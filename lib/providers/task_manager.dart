@@ -7,11 +7,13 @@ import '../models/video_task.dart';
 import '../services/log_service.dart';
 import '../services/storage_service.dart';
 import '../services/video_compression_service.dart';
+import '../services/permission_service.dart';
 
 class TaskManager extends ChangeNotifier {
   final LogService logService;
   final StorageService storageService;
   late final VideoCompressionService compressionService;
+  late final PermissionService permissionService;
 
   final List<VideoTask> _tasks = [];
   String? _outputDirectory;
@@ -32,6 +34,7 @@ class TaskManager extends ChangeNotifier {
     required this.storageService,
   }) {
     compressionService = VideoCompressionService(logService: logService);
+    permissionService = PermissionService(logService: logService);
   }
 
   Future<void> init() async {
@@ -108,6 +111,16 @@ class TaskManager extends ChangeNotifier {
 
   Future<void> pickVideos() async {
     try {
+      // Check and request permissions first
+      final hasPermission = await permissionService.hasStoragePermissions();
+      if (!hasPermission) {
+        final granted = await permissionService.requestStoragePermissions();
+        if (!granted) {
+          logService.error('Storage permission denied');
+          return;
+        }
+      }
+
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
         allowMultiple: true,
