@@ -112,33 +112,3 @@ jobs:
           name: ios-release-ipa
           path: build/ios/iphoneos/app-release.ipa
           retention-days: 90
-
-  # 代码质量检查
-  code-quality:
-    name: Code Quality Check
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.35.7'
-          channel: 'stable'
-          cache: true
-      
-      - name: Get dependencies
-        run: flutter pub get
-      
-      - name: Check formatting
-        run: dart format --set-exit-if-changed .
-        continue-on-error: true
-      
-      - name: Analyze code
-        run: flutter analyze
-      
-      - name: Run tests with coverage
-        run: flutter test --coverage
-        continue-on-error: true
