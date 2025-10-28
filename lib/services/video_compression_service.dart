@@ -66,13 +66,30 @@ class VideoCompressionService {
         throw Exception('Compressed file not found at ${info.path}');
       }
 
+      // Check if output file already exists and adjust name if needed
+      String finalOutputPath = task.outputPath;
+      if (await File(finalOutputPath).exists() && info.path != finalOutputPath) {
+        final dir = path.dirname(finalOutputPath);
+        final fileName = path.basename(finalOutputPath);
+        final nameWithoutExt = path.basenameWithoutExtension(fileName);
+        final ext = path.extension(fileName);
+        
+        int suffix = 1;
+        while (await File(finalOutputPath).exists()) {
+          finalOutputPath = path.join(dir, '${nameWithoutExt}_$suffix$ext');
+          suffix++;
+        }
+        
+        logService.info('Output file exists, using: ${path.basename(finalOutputPath)}', taskId: task.id);
+      }
+
       // If output path is different, move the file
-      if (info.path != task.outputPath) {
-        await compressedFile.copy(task.outputPath);
+      if (info.path != finalOutputPath) {
+        await compressedFile.copy(finalOutputPath);
         await compressedFile.delete();
       }
 
-      final outputFile = File(task.outputPath);
+      final outputFile = File(finalOutputPath);
       final outputSize = await outputFile.length();
       
       logService.info(
@@ -141,9 +158,22 @@ class VideoCompressionService {
     }
   }
 
-  String getOutputFileName(String inputFileName) {
+  String getOutputFileName(String inputFileName, int crf, String outputDir) {
     final nameWithoutExt = path.basenameWithoutExtension(inputFileName);
     final ext = path.extension(inputFileName);
-    return '${nameWithoutExt}_compressed$ext';
+    
+    // 生成基础文件名: 原名_batch{crf}.扩展名
+    String baseFileName = '${nameWithoutExt}_batch$crf$ext';
+    String outputPath = path.join(outputDir, baseFileName);
+    
+    // 检查文件是否已存在，如果存在则添加编号后缀
+    int suffix = 1;
+    while (File(outputPath).existsSync()) {
+      baseFileName = '${nameWithoutExt}_batch${crf}_$suffix$ext';
+      outputPath = path.join(outputDir, baseFileName);
+      suffix++;
+    }
+    
+    return baseFileName;
   }
 }

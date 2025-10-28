@@ -165,7 +165,11 @@ class TaskManager extends ChangeNotifier {
         for (final file in result.files) {
           if (file.path != null) {
             final fileName = path.basename(file.path!);
-            final outputFileName = compressionService.getOutputFileName(fileName);
+            final outputFileName = compressionService.getOutputFileName(
+              fileName,
+              _compressionSettings.crf,
+              _outputDirectory!,
+            );
             final outputPath = path.join(_outputDirectory!, outputFileName);
 
             // Get file size
