@@ -4,6 +4,7 @@ import '../providers/task_manager.dart';
 import '../widgets/task_list.dart';
 import '../widgets/stats_card.dart';
 import 'logs_screen.dart';
+import 'settings_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -15,6 +16,16 @@ class HomeScreen extends StatelessWidget {
         title: const Text('FFmpeg-Mobile'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: '压缩设置',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.article_outlined),
             tooltip: '查看日志',

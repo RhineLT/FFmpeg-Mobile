@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import '../models/video_task.dart';
+import '../models/compression_settings.dart';
 import '../services/log_service.dart';
 import '../services/storage_service.dart';
 import '../services/video_compression_service.dart';
@@ -19,15 +20,24 @@ class TaskManager extends ChangeNotifier {
   String? _outputDirectory;
   bool _isProcessing = false;
   VideoTask? _currentTask;
+  CompressionSettings _compressionSettings = CompressionSettings();
 
   List<VideoTask> get tasks => List.unmodifiable(_tasks);
   String? get outputDirectory => _outputDirectory;
   bool get isProcessing => _isProcessing;
   VideoTask? get currentTask => _currentTask;
+  CompressionSettings get compressionSettings => _compressionSettings;
   
   int get pendingCount => _tasks.where((t) => t.status == VideoStatus.pending).length;
   int get completedCount => _tasks.where((t) => t.status == VideoStatus.completed).length;
   int get failedCount => _tasks.where((t) => t.status == VideoStatus.failed).length;
+
+  void updateCompressionSettings(CompressionSettings settings) {
+    _compressionSettings = settings;
+    storageService.saveCompressionSettings(settings);
+    logService.info('Compression settings updated: ${settings.commandPreview}');
+    notifyListeners();
+  }
 
   TaskManager({
     required this.logService,
@@ -41,6 +51,9 @@ class TaskManager extends ChangeNotifier {
     // Load saved tasks
     _tasks.addAll(await storageService.loadTasks());
     
+    // Load compression settings
+    _compressionSettings = await storageService.loadCompressionSettings();
+    
     // Load output directory
     _outputDirectory = await storageService.loadOutputDirectory();
     
@@ -53,6 +66,7 @@ class TaskManager extends ChangeNotifier {
     }
     
     logService.info('Task manager initialized with ${_tasks.length} tasks');
+    logService.info('Compression settings: ${_compressionSettings.commandPreview}');
     
     // Reset any tasks that were processing when app was closed
     for (var task in _tasks) {

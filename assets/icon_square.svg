@@ -1,0 +1,18 @@
+<svg width="1024" height="1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1024" height="1024" fill="#0D0D0D"/>
+  
+  <!-- Green accent border -->
+  <rect x="50" y="50" width="924" height="924" fill="none" stroke="#00D660" stroke-width="8"/>
+  
+  <!-- FFmpeg text style -->
+  <text x="512" y="400" font-family="Arial Black, sans-serif" font-size="200" font-weight="bold" fill="#00D660" text-anchor="middle">FF</text>
+  <text x="512" y="620" font-family="Arial, sans-serif" font-size="140" fill="#FFFFFF" text-anchor="middle">mobile</text>
+  
+  <!-- Play icon overlay -->
+  <polygon points="380,750 380,870 480,810" fill="#00D660"/>
+  
+  <!-- Compression arrows -->
+  <path d="M 550 780 L 620 780 L 600 760 M 620 780 L 600 800" stroke="#00D660" stroke-width="6" fill="none"/>
+  <path d="M 550 830 L 620 830 L 600 810 M 620 830 L 600 850" stroke="#00D660" stroke-width="6" fill="none"/>
+</svg>
