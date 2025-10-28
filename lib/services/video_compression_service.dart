@@ -6,6 +6,7 @@ import 'log_service.dart';
 
 class VideoCompressionService {
   final LogService logService;
+  dynamic _progressSubscription;
   
   VideoCompressionService({required this.logService});
 
@@ -31,8 +32,11 @@ class VideoCompressionService {
         logService.info('Created output directory: ${outputDir.path}', taskId: task.id);
       }
 
-      // Subscribe to compression progress
-      VideoCompress.compressProgress$.subscribe((progress) {
+      // Cancel any existing subscription before creating a new one
+      _progressSubscription?.unsubscribe();
+      
+      // Subscribe to compression progress using the correct method
+      _progressSubscription = VideoCompress.compressProgress$.subscribe((progress) {
         if (progress > 0) {
           final normalizedProgress = (progress / 100.0).clamp(0.0, 0.99);
           onProgress(normalizedProgress);
@@ -110,6 +114,7 @@ class VideoCompressionService {
 
   Future<void> cancelCompression(int sessionId) async {
     try {
+      _progressSubscription?.unsubscribe();
       VideoCompress.cancelCompression();
       logService.info('Cancelled compression');
     } catch (e) {
@@ -119,6 +124,7 @@ class VideoCompressionService {
 
   Future<void> cancelAllSessions() async {
     try {
+      _progressSubscription?.unsubscribe();
       VideoCompress.cancelCompression();
       logService.info('Cancelled all compression tasks');
     } catch (e) {
@@ -128,6 +134,7 @@ class VideoCompressionService {
 
   Future<void> dispose() async {
     try {
+      _progressSubscription?.unsubscribe();
       VideoCompress.dispose();
     } catch (e) {
       logService.error('Error disposing VideoCompress', error: e);

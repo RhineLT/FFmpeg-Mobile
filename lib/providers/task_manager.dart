@@ -71,14 +71,30 @@ class TaskManager extends ChangeNotifier {
   Future<String?> _getDefaultOutputDirectory() async {
     try {
       if (Platform.isAndroid) {
-        // For Android, use external storage
-        final directory = await getExternalStorageDirectory();
-        if (directory != null) {
-          final outputDir = Directory('${directory.path}/CompressedVideos');
+        // For Android, use public Movies directory that's accessible via file manager
+        // This is /storage/emulated/0/Movies/FFmpeg-Mobile/
+        const publicPath = '/storage/emulated/0/Movies/FFmpeg-Mobile';
+        final outputDir = Directory(publicPath);
+        
+        try {
           if (!await outputDir.exists()) {
             await outputDir.create(recursive: true);
+            logService.info('Created public output directory: $publicPath');
           }
           return outputDir.path;
+        } catch (e) {
+          // If we can't create in public directory, fall back to external storage
+          logService.warning('Cannot create public directory, using fallback: $e');
+          final directory = await getExternalStorageDirectory();
+          if (directory != null) {
+            // Try to use a path closer to root
+            final fallbackPath = directory.path.split('Android')[0];
+            final outputDir = Directory('${fallbackPath}Movies/FFmpeg-Mobile');
+            if (!await outputDir.exists()) {
+              await outputDir.create(recursive: true);
+            }
+            return outputDir.path;
+          }
         }
       } else if (Platform.isIOS) {
         // For iOS, use documents directory
