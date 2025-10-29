@@ -19,3 +19,8 @@
 # Prevent stripping of FFmpeg libraries
 -keep class com.arthenica.mobileffmpeg.** { *; }
 -dontwarn com.arthenica.mobileffmpeg.**
+
+# Ignore missing Play Core libraries (we don't use deferred components)
+-dontwarn com.google.android.play.core.splitcompat.**
+-dontwarn com.google.android.play.core.splitinstall.**
+-dontwarn com.google.android.play.core.tasks.**
