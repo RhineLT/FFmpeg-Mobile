@@ -71,18 +71,21 @@ class VideoCompressionService {
         );
       }
 
-      // 构建 FFmpeg 命令
-      final command = _buildFFmpegCommand(
+      // 构建 FFmpeg 参数
+      final commandArgs = _buildFFmpegArguments(
         inputPath: task.inputPath,
         outputPath: task.outputPath,
         settings: settings,
       );
 
-      logService.info('FFmpeg command: ffmpeg $command', taskId: task.id);
+      logService.info(
+        'FFmpeg command: ffmpeg ${_formatCommandForLog(commandArgs)}',
+        taskId: task.id,
+      );
 
       // 执行 FFmpeg 压缩
-      final session = await FFmpegKit.executeAsync(
-        command,
+      final session = await FFmpegKit.executeWithArgumentsAsync(
+        commandArgs,
         (session) async {
           final returnCode = await session.getReturnCode();
           if (ReturnCode.isSuccess(returnCode)) {
@@ -221,53 +224,72 @@ class VideoCompressionService {
     }
   }
 
-  String _buildFFmpegCommand({
+  List<String> _buildFFmpegArguments({
     required String inputPath,
     required String outputPath,
     required CompressionSettings settings,
   }) {
-    final List<String> args = [];
-
-    args.add('-i "$inputPath"');
+    final args = <String>['-y', '-i', inputPath];
 
     if (settings.useHardwareAccel) {
       if (Platform.isAndroid) {
-        args.add('-c:v hevc_mediacodec');
+        args.addAll(['-c:v', 'hevc_mediacodec']);
       } else if (Platform.isIOS || Platform.isMacOS) {
-        args.add('-c:v hevc_videotoolbox');
+        args.addAll(['-c:v', 'hevc_videotoolbox']);
       } else {
-        args.add('-c:v libx265');
+        args.addAll(['-c:v', 'libx265']);
       }
     } else {
-      args.add('-c:v libx265');
-      args.add('-crf ${settings.crf}');
-      args.add('-preset ${settings.preset}');
+      args.addAll(['-c:v', 'libx265']);
+      args.addAll(['-crf', settings.crf.toString()]);
+      args.addAll(['-preset', settings.preset]);
     }
 
     if (settings.resolution != 'original') {
-      args.add('-s ${settings.resolution}');
+      args.addAll(['-s', settings.resolution]);
     }
 
     if (settings.frameRate > 0) {
-      args.add('-r ${settings.frameRate}');
+      args.addAll(['-r', settings.frameRate.toString()]);
     }
 
     if (settings.maxBitrate > 0) {
-      args.add('-maxrate ${settings.maxBitrate}k');
-      args.add('-bufsize ${settings.maxBitrate * 2}k');
+      args.addAll(['-maxrate', '${settings.maxBitrate}k']);
+      args.addAll(['-bufsize', '${settings.maxBitrate * 2}k']);
     }
 
-    args.add('-c:a aac');
-    args.add('-b:a 128k');
+    args.addAll(['-c:a', 'aac']);
+    args.addAll(['-b:a', '128k']);
 
     if (settings.customParams.isNotEmpty) {
-      args.add(settings.customParams);
+      args.addAll(_splitCustomParams(settings.customParams));
     }
 
-    args.add('-y');
-    args.add('"$outputPath"');
+    args.add(outputPath);
 
-    return args.join(' ');
+    return args;
+  }
+
+  String _formatCommandForLog(List<String> args) {
+    return args.map((arg) => arg.contains(' ') ? '"$arg"' : arg).join(' ');
+  }
+
+  List<String> _splitCustomParams(String params) {
+    final regex = RegExp(r'''("[^"]*"|'[^']*'|\S+)''');
+    return regex
+        .allMatches(params)
+        .map((match) {
+          final value = match.group(0) ?? '';
+          if (value.startsWith('"') && value.endsWith('"')) {
+            return value.substring(1, value.length - 1);
+          }
+          if (value.startsWith("'") && value.endsWith("'")) {
+            return value.substring(1, value.length - 1);
+          }
+          return value;
+        })
+        .where((arg) => arg.isNotEmpty)
+        .toList();
   }
 
   Future<void> cancelCompression(int sessionId) async {
