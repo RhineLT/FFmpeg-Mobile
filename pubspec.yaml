@@ -48,6 +48,9 @@ dependencies:
   # Permissions
   permission_handler: ^11.4.0
   
+  # Device info
+  device_info_plus: ^11.2.0
+  
   # Storage for settings
   shared_preferences: ^2.3.3
 

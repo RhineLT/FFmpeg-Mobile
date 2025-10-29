@@ -5,7 +5,9 @@ import 'package:provider/provider.dart';
 import 'providers/task_manager.dart';
 import 'services/log_service.dart';
 import 'services/storage_service.dart';
+import 'services/permission_service.dart';
 import 'screens/home_screen.dart';
+import 'screens/permission_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +29,7 @@ void main() {
 
       final logService = LogService();
       final storageService = StorageService();
+      final permissionService = PermissionService(logService: logService);
       final taskManager = TaskManager(
         logService: logService,
         storageService: storageService,
@@ -38,6 +41,7 @@ void main() {
           logService: logService,
           taskManager: taskManager,
           storageService: storageService,
+          permissionService: permissionService,
         ),
       );
     },
@@ -52,7 +56,7 @@ void main() {
   );
 }
 
-Future<void> _initializeApp({
+Future<void> _initializeAppInternal({
   required LogService logService,
   required StorageService storageService,
   required TaskManager taskManager,
@@ -84,12 +88,14 @@ class MyApp extends StatefulWidget {
   final LogService logService;
   final TaskManager taskManager;
   final StorageService storageService;
+  final PermissionService permissionService;
 
   const MyApp({
     super.key,
     required this.logService,
     required this.taskManager,
     required this.storageService,
+    required this.permissionService,
   });
 
   @override
@@ -98,11 +104,35 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   late Future<void> _initializationFuture;
+  bool _hasPermission = false;
+  bool _permissionChecked = false;
 
   @override
   void initState() {
     super.initState();
-    _initializationFuture = _initializeApp(
+    _checkPermissions();
+  }
+
+  Future<void> _checkPermissions() async {
+    final hasPermission = await widget.permissionService.hasStoragePermissions();
+    setState(() {
+      _hasPermission = hasPermission;
+      _permissionChecked = true;
+    });
+
+    if (hasPermission) {
+      _initializeApp();
+    }
+  }
+
+  void _initializeApp() {
+    setState(() {
+      _initializationFuture = _initializeAppAsync();
+    });
+  }
+
+  Future<void> _initializeAppAsync() async {
+    await _initializeAppInternal(
       logService: widget.logService,
       storageService: widget.storageService,
       taskManager: widget.taskManager,
@@ -122,23 +152,35 @@ class _MyAppState extends State<MyApp> {
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
           useMaterial3: true,
         ),
-        home: FutureBuilder<void>(
-          future: _initializationFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const _InitializationLoadingScreen();
-            }
+        home: !_permissionChecked
+            ? const _InitializationLoadingScreen()
+            : !_hasPermission
+                ? PermissionScreen(
+                    permissionService: widget.permissionService,
+                    onPermissionGranted: () {
+                      setState(() {
+                        _hasPermission = true;
+                      });
+                      _initializeApp();
+                    },
+                  )
+                : FutureBuilder<void>(
+                    future: _initializationFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const _InitializationLoadingScreen();
+                      }
 
-            if (snapshot.hasError) {
-              return _InitializationErrorScreen(
-                error: snapshot.error,
-                stackTrace: snapshot.stackTrace,
-              );
-            }
+                      if (snapshot.hasError) {
+                        return _InitializationErrorScreen(
+                          error: snapshot.error,
+                          stackTrace: snapshot.stackTrace,
+                        );
+                      }
 
-            return const HomeScreen();
-          },
-        ),
+                      return const HomeScreen();
+                    },
+                  ),
         debugShowCheckedModeBanner: false,
       ),
     );
