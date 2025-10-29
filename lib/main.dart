@@ -20,25 +20,32 @@ void main() async {
   };
 
   runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-
-    developer.log('App starting...', name: 'FFmpeg-Mobile');
-
     try {
-      // Initialize services
+      // Must initialize Flutter binding first
+      WidgetsFlutterBinding.ensureInitialized();
+      
+      developer.log('App starting...', name: 'FFmpeg-Mobile');
+
+      // Initialize services with proper error handling
       developer.log('Initializing LogService...', name: 'FFmpeg-Mobile');
       final logService = LogService();
       await logService.init();
+      developer.log('LogService initialized', name: 'FFmpeg-Mobile');
 
       developer.log('Initializing StorageService...', name: 'FFmpeg-Mobile');
       final storageService = StorageService();
+      await storageService.init();
+      developer.log('StorageService initialized', name: 'FFmpeg-Mobile');
       
-      developer.log('Initializing TaskManager...', name: 'FFmpeg-Mobile');
+      developer.log('Creating TaskManager...', name: 'FFmpeg-Mobile');
       final taskManager = TaskManager(
         logService: logService,
         storageService: storageService,
       );
+      
+      developer.log('Initializing TaskManager...', name: 'FFmpeg-Mobile');
       await taskManager.init();
+      developer.log('TaskManager initialized', name: 'FFmpeg-Mobile');
 
       developer.log('Running app...', name: 'FFmpeg-Mobile');
       runApp(MyApp(
@@ -53,28 +60,67 @@ void main() async {
         stackTrace: stackTrace,
       );
       
-      // Show error screen
+      // Show error screen with full error details
       runApp(MaterialApp(
+        debugShowCheckedModeBanner: false,
         home: Scaffold(
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '应用初始化失败',
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '错误: $e',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                ],
+          backgroundColor: Colors.white,
+          body: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 80, color: Colors.red),
+                    const SizedBox(height: 24),
+                    const Text(
+                      '应用初始化失败',
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '错误信息:',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red[200]!),
+                      ),
+                      child: Text(
+                        '$e',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 14, color: Colors.black87),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '堆栈跟踪:',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Text(
+                            '$stackTrace',
+                            style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
