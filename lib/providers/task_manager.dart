@@ -54,16 +54,6 @@ class TaskManager extends ChangeNotifier {
       return;
     }
 
-    bool allowPublicDirectory = !Platform.isAndroid;
-    if (Platform.isAndroid) {
-      allowPublicDirectory = await permissionService.ensureStoragePermissions();
-      if (!allowPublicDirectory) {
-        logService.warning(
-          'Storage permissions not granted, using app-specific directory',
-        );
-      }
-    }
-
     // Load saved tasks
     _tasks.addAll(await storageService.loadTasks());
 
@@ -73,26 +63,9 @@ class TaskManager extends ChangeNotifier {
     // Load output directory
     _outputDirectory = await storageService.loadOutputDirectory();
 
-    if (_outputDirectory != null && Platform.isAndroid) {
-      final isPublicPath = _outputDirectory!.startsWith('/storage/emulated/0/');
-      if (isPublicPath && !allowPublicDirectory) {
-        logService.warning(
-          'Existing public output directory not accessible without permissions. Using internal location instead.',
-        );
-        _outputDirectory = await _getDefaultOutputDirectory(
-          allowPublicDirectory: false,
-        );
-        if (_outputDirectory != null) {
-          await storageService.saveOutputDirectory(_outputDirectory!);
-        }
-      }
-    }
-
     // If no output directory is set, use default
     if (_outputDirectory == null) {
-      _outputDirectory = await _getDefaultOutputDirectory(
-        allowPublicDirectory: allowPublicDirectory,
-      );
+      _outputDirectory = await _getDefaultOutputDirectory();
       if (_outputDirectory != null) {
         await storageService.saveOutputDirectory(_outputDirectory!);
       } else {
@@ -123,43 +96,22 @@ class TaskManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> _getDefaultOutputDirectory({
-    required bool allowPublicDirectory,
-  }) async {
+  Future<String?> _getDefaultOutputDirectory() async {
     try {
       if (Platform.isAndroid) {
-        if (allowPublicDirectory) {
-          const publicPath = '/storage/emulated/0/Movies/FFmpeg-Mobile';
-          final outputDir = Directory(publicPath);
-
-          try {
-            if (!await outputDir.exists()) {
-              await outputDir.create(recursive: true);
-              logService.info('Created public output directory: $publicPath');
-            }
-            return outputDir.path;
-          } catch (e) {
-            logService.warning(
-              'Cannot create public directory, falling back: $e',
-            );
-          }
-        } else {
-          logService.debug(
-            'Skipping public directory creation due to missing permissions',
-          );
-        }
-
+        // Try app-specific external storage directory first
         final externalDir = await getExternalStorageDirectory();
         if (externalDir != null) {
-          final fallbackDir = Directory(
+          final outputDir = Directory(
             path.join(externalDir.path, 'Movies', 'FFmpeg-Mobile'),
           );
-          if (!await fallbackDir.exists()) {
-            await fallbackDir.create(recursive: true);
+          if (!await outputDir.exists()) {
+            await outputDir.create(recursive: true);
           }
-          return fallbackDir.path;
+          return outputDir.path;
         }
 
+        // Fallback to documents directory
         final docsDir = await getApplicationDocumentsDirectory();
         final internalDir = Directory(
           path.join(docsDir.path, 'Movies', 'FFmpeg-Mobile'),
@@ -185,16 +137,6 @@ class TaskManager extends ChangeNotifier {
 
   Future<void> selectOutputDirectory() async {
     try {
-      if (Platform.isAndroid) {
-        final granted = await permissionService.ensureStoragePermissions();
-        if (!granted) {
-          logService.error(
-            'Cannot select output directory without storage permissions',
-          );
-          return;
-        }
-      }
-
       final result = await FilePicker.platform.getDirectoryPath();
       if (result != null) {
         _outputDirectory = result;
@@ -210,8 +152,9 @@ class TaskManager extends ChangeNotifier {
   Future<void> pickVideos() async {
     try {
       // Check and request permissions first
-      if (Platform.isAndroid) {
-        final granted = await permissionService.ensureStoragePermissions();
+      final hasPermission = await permissionService.hasStoragePermissions();
+      if (!hasPermission) {
+        final granted = await permissionService.requestStoragePermissions();
         if (!granted) {
           logService.error('Storage permission denied');
           return;
