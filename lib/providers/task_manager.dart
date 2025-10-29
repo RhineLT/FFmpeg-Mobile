@@ -239,6 +239,7 @@ class TaskManager extends ChangeNotifier {
       // Process the task
       await compressionService.compressVideo(
         task: nextTask,
+        settings: _compressionSettings,
         onProgress: (progress) {
           final index = _tasks.indexWhere((t) => t.id == nextTask.id);
           if (index != -1) {

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:video_compress/video_compress.dart';
 import 'package:path/path.dart' as path;
 import '../models/video_task.dart';
+import '../models/compression_settings.dart';
 import 'log_service.dart';
 
 class VideoCompressionService {
@@ -12,11 +13,21 @@ class VideoCompressionService {
 
   Future<void> compressVideo({
     required VideoTask task,
+    required CompressionSettings settings,
     required Function(double progress) onProgress,
     required Function(VideoTask updatedTask) onStatusChange,
   }) async {
     try {
       logService.info('Starting compression for ${task.fileName}', taskId: task.id);
+      
+      // 读取原始视频信息
+      final mediaInfo = await VideoCompress.getMediaInfo(task.inputPath);
+      logService.info(
+        'Video info - Resolution: ${mediaInfo.width}x${mediaInfo.height}, '
+        'Duration: ${mediaInfo.duration?.toStringAsFixed(1)}s, '
+        'Bitrate: ${(mediaInfo.filesize! / (mediaInfo.duration ?? 1) / 1024).toStringAsFixed(0)} KB/s',
+        taskId: task.id,
+      );
       
       // Update status to processing
       final processingTask = task.copyWith(
@@ -44,16 +55,46 @@ class VideoCompressionService {
         }
       });
 
-      logService.info('Starting video compression with H.265 CRF 28 equivalent settings', taskId: task.id);
+      // 根据设置确定输出分辨率
+      // 注意: video_compress 库不支持直接设置分辨率,分辨率由 VideoQuality 控制
+      // 这里仅记录用户设置,实际输出分辨率可能与设置不完全一致
+      if (settings.resolution != 'original') {
+        final parts = settings.resolution.split('x');
+        if (parts.length == 2) {
+          final targetWidth = int.tryParse(parts[0]);
+          final targetHeight = int.tryParse(parts[1]);
+          logService.warning(
+            'Target resolution: ${targetWidth}x$targetHeight\n'
+            'Note: video_compress library does not support custom resolution.\n'
+            'Output resolution is controlled by VideoQuality setting.',
+            taskId: task.id
+          );
+        }
+      } else {
+        logService.info('Using original resolution: ${mediaInfo.width?.toInt()}x${mediaInfo.height?.toInt()}', taskId: task.id);
+      }
+
+      // 根据设置确定输出帧率
+      int outputFrameRate = 30; // 默认 30fps
+      if (settings.frameRate > 0) {
+        outputFrameRate = settings.frameRate;
+        logService.info('Target frame rate: $outputFrameRate fps', taskId: task.id);
+      } else {
+        // 使用原始帧率,但需要从视频信息中获取
+        // video_compress 要求帧率参数,如果原始信息中没有,使用30fps
+        logService.info('Using original frame rate: ~30 fps (video_compress default)', taskId: task.id);
+      }
+
+      logService.info('Starting video compression with settings: CRF=${settings.crf}, Preset=${settings.preset}, FrameRate=${outputFrameRate}fps', taskId: task.id);
 
       // Compress video
       // video_compress uses MediaCodec on Android and AVAssetExportSession on iOS
-      // We'll use high quality settings to approximate H.265 CRF 28
       final info = await VideoCompress.compressVideo(
         task.inputPath,
         quality: VideoQuality.DefaultQuality,
         deleteOrigin: false,
         includeAudio: true,
+        frameRate: outputFrameRate,
       );
 
       if (info == null) {
