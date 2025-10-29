@@ -65,7 +65,9 @@ class TaskManager extends ChangeNotifier {
       // Load compression settings
       logService.info('Loading compression settings...');
       _compressionSettings = await storageService.loadCompressionSettings();
-      logService.info('Compression settings loaded: ${_compressionSettings.commandPreview}');
+      logService.info(
+        'Compression settings loaded: ${_compressionSettings.commandPreview}',
+      );
 
       // Load output directory
       logService.info('Loading output directory...');
@@ -82,7 +84,9 @@ class TaskManager extends ChangeNotifier {
           logService.info('Default output directory set: $_outputDirectory');
           await storageService.saveOutputDirectory(_outputDirectory!);
         } else {
-          logService.warning('Failed to resolve default output directory - will need to set manually');
+          logService.warning(
+            'Failed to resolve default output directory - will need to set manually',
+          );
         }
       }
 
@@ -106,13 +110,19 @@ class TaskManager extends ChangeNotifier {
 
       _initialized = true;
       await _saveTasks();
-      
-      logService.info('Task manager initialized successfully with ${_tasks.length} tasks');
-      
+
+      logService.info(
+        'Task manager initialized successfully with ${_tasks.length} tasks',
+      );
+
       notifyListeners();
     } catch (e, stackTrace) {
-      logService.error('Failed to initialize TaskManager: $e\nStackTrace: $stackTrace', error: e);
-      _initialized = true; // Mark as initialized anyway to allow app to continue
+      logService.error(
+        'Failed to initialize TaskManager: $e\nStackTrace: $stackTrace',
+        error: e,
+      );
+      _initialized =
+          true; // Mark as initialized anyway to allow app to continue
       notifyListeners();
       rethrow;
     }
@@ -121,12 +131,14 @@ class TaskManager extends ChangeNotifier {
   Future<String?> _getDefaultOutputDirectory() async {
     try {
       logService.info('Getting default output directory...');
-      
+
       if (Platform.isAndroid) {
         // 简化版本：直接使用固定路径
         try {
           // 尝试使用 /storage/emulated/0/Movies/FFmpeg-Mobile
-          final outputDir = Directory('/storage/emulated/0/Movies/FFmpeg-Mobile');
+          final outputDir = Directory(
+            '/storage/emulated/0/Movies/FFmpeg-Mobile',
+          );
           if (!await outputDir.exists()) {
             await outputDir.create(recursive: true);
             logService.info('Created output directory: ${outputDir.path}');
@@ -135,15 +147,21 @@ class TaskManager extends ChangeNotifier {
           return outputDir.path;
         } catch (e) {
           logService.warning('Failed to create default Movies directory: $e');
-          
+
           // 回退到 Downloads 目录
           try {
-            final outputDir = Directory('/storage/emulated/0/Download/FFmpeg-Mobile');
+            final outputDir = Directory(
+              '/storage/emulated/0/Download/FFmpeg-Mobile',
+            );
             if (!await outputDir.exists()) {
               await outputDir.create(recursive: true);
-              logService.info('Created output directory in Downloads: ${outputDir.path}');
+              logService.info(
+                'Created output directory in Downloads: ${outputDir.path}',
+              );
             }
-            logService.info('Using Downloads output directory: ${outputDir.path}');
+            logService.info(
+              'Using Downloads output directory: ${outputDir.path}',
+            );
             return outputDir.path;
           } catch (e2) {
             logService.error('Failed to create Downloads directory: $e2');
@@ -164,81 +182,132 @@ class TaskManager extends ChangeNotifier {
         }
       }
     } catch (e, stackTrace) {
-      logService.error('Failed to get default output directory: $e\nStackTrace: $stackTrace', error: e);
+      logService.error(
+        'Failed to get default output directory: $e\nStackTrace: $stackTrace',
+        error: e,
+      );
     }
-    
-    logService.warning('Could not resolve any output directory - user must set manually');
+
+    logService.warning(
+      'Could not resolve any output directory - user must set manually',
+    );
     return null;
   }
 
   Future<void> selectOutputDirectory() async {
     try {
+      logService.info('Opening directory picker for output path...');
       final result = await FilePicker.platform.getDirectoryPath();
-      if (result != null) {
-        _outputDirectory = result;
-        await storageService.saveOutputDirectory(result);
-        logService.info('Output directory set to: $result');
-        notifyListeners();
+      logService.debug('Directory picker result: ${result ?? "<cancelled>"}');
+
+      if (result == null) {
+        logService.info('Directory picker closed without selection');
+        return;
       }
-    } catch (e) {
-      logService.error('Failed to select output directory', error: e);
+
+      if (result.isEmpty) {
+        logService.warning('Directory picker returned an empty path');
+        return;
+      }
+
+      _outputDirectory = result;
+      await storageService.saveOutputDirectory(result);
+      logService.info('Output directory set to: $result');
+      notifyListeners();
+    } catch (e, stackTrace) {
+      logService.error(
+        'Failed to select output directory',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 
   Future<void> pickVideos() async {
     try {
-      // FilePicker will handle permissions automatically
       logService.info('Opening file picker for videos...');
+      logService.debug(
+        'Current output directory: ${_outputDirectory ?? "<not set>"}',
+      );
 
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
         allowMultiple: true,
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        if (_outputDirectory == null) {
-          logService.error('No output directory set');
-          return;
-        }
-
-        for (final file in result.files) {
-          if (file.path != null) {
-            final fileName = path.basename(file.path!);
-            final outputFileName = compressionService.getOutputFileName(
-              fileName,
-              _compressionSettings.crf,
-              _outputDirectory!,
-            );
-            final outputPath = path.join(_outputDirectory!, outputFileName);
-
-            // Get file size
-            final fileSize = File(file.path!).lengthSync();
-
-            final task = VideoTask(
-              id:
-                  DateTime.now().millisecondsSinceEpoch.toString() +
-                  _tasks.length.toString(),
-              inputPath: file.path!,
-              outputPath: outputPath,
-              fileName: fileName,
-              fileSize: fileSize,
-            );
-
-            _tasks.add(task);
-            logService.info(
-              'Added task: $fileName (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)',
-              taskId: task.id,
-            );
-          }
-        }
-
-        await _saveTasks();
-        notifyListeners();
-
-        logService.info('Added ${result.files.length} video(s) to queue');
+      if (result == null) {
+        logService.info('File picker closed without selection');
+        return;
       }
-    } catch (e) {
-      logService.error('Failed to pick videos', error: e);
+
+      logService.info('File picker returned ${result.files.length} entries');
+
+      if (result.files.isEmpty) {
+        logService.info('No files selected in picker response');
+        return;
+      }
+
+      if (_outputDirectory == null) {
+        logService.error(
+          'No output directory set when processing picked videos',
+        );
+        return;
+      }
+
+      for (final file in result.files) {
+        if (file.path != null) {
+          logService.debug('Processing picked file path: ${file.path}');
+          final fileName = path.basename(file.path!);
+          final outputFileName = compressionService.getOutputFileName(
+            fileName,
+            _compressionSettings.crf,
+            _outputDirectory!,
+          );
+          final outputPath = path.join(_outputDirectory!, outputFileName);
+
+          int fileSize;
+          try {
+            fileSize = File(file.path!).lengthSync();
+          } catch (e, stackTrace) {
+            logService.warning('Failed to read picked file size: ${file.path}');
+            logService.error(
+              'Error reading file size',
+              error: e,
+              stackTrace: stackTrace,
+            );
+            continue;
+          }
+
+          final task = VideoTask(
+            id:
+                DateTime.now().millisecondsSinceEpoch.toString() +
+                _tasks.length.toString(),
+            inputPath: file.path!,
+            outputPath: outputPath,
+            fileName: fileName,
+            fileSize: fileSize,
+          );
+
+          _tasks.add(task);
+          logService.info(
+            'Added task: $fileName (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)',
+            taskId: task.id,
+          );
+        } else {
+          logService.warning('Skipped file without path from picker result');
+        }
+      }
+
+      await _saveTasks();
+      notifyListeners();
+
+      logService.info('Added ${result.files.length} video(s) to queue');
+    } catch (e, stackTrace) {
+      logService.error(
+        'Failed to pick videos',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 

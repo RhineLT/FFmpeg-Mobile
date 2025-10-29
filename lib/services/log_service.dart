@@ -18,7 +18,7 @@ class LogService extends ChangeNotifier {
   final List<LogEntry> _logs = [];
   static const int _maxLogs = 1000;
   static const String _logsKey = 'app_logs';
-  
+
   SharedPreferences? _prefs;
   bool _initialized = false;
 
@@ -26,13 +26,13 @@ class LogService extends ChangeNotifier {
 
   Future<void> init() async {
     if (_initialized) return;
-    
+
     try {
       debugPrint('LogService: Initializing SharedPreferences...');
       _prefs = await SharedPreferences.getInstance();
       _initialized = true;
       debugPrint('LogService: SharedPreferences initialized');
-      
+
       await _loadLogs();
       debugPrint('LogService: Loaded ${_logs.length} log entries');
     } catch (e, stackTrace) {
@@ -55,9 +55,23 @@ class LogService extends ChangeNotifier {
     _addLog('WARNING', message, taskId: taskId);
   }
 
-  void error(String message, {String? taskId, Object? error}) {
-    _logger.e(message, error: error);
-    _addLog('ERROR', message, taskId: taskId);
+  void error(
+    String message, {
+    String? taskId,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    _logger.e(message, error: error, stackTrace: stackTrace);
+
+    var details = message;
+    if (error != null) {
+      details += '\nError: $error';
+    }
+    if (stackTrace != null) {
+      details += '\nStackTrace: $stackTrace';
+    }
+
+    _addLog('ERROR', details, taskId: taskId);
   }
 
   void debug(String message, {String? taskId}) {
@@ -87,10 +101,12 @@ class LogService extends ChangeNotifier {
   Future<void> _saveLogs() async {
     try {
       if (_prefsInstance == null) {
-        debugPrint('LogService: Cannot save logs - SharedPreferences not initialized');
+        debugPrint(
+          'LogService: Cannot save logs - SharedPreferences not initialized',
+        );
         return;
       }
-      
+
       final logsJson = _logs.map((log) => log.toJson()).toList();
       await _prefsInstance!.setString(_logsKey, jsonEncode(logsJson));
     } catch (e) {
@@ -102,10 +118,12 @@ class LogService extends ChangeNotifier {
   Future<void> _loadLogs() async {
     try {
       if (_prefsInstance == null) {
-        debugPrint('LogService: Cannot load logs - SharedPreferences not initialized');
+        debugPrint(
+          'LogService: Cannot load logs - SharedPreferences not initialized',
+        );
         return;
       }
-      
+
       final logsString = _prefsInstance!.getString(_logsKey);
       if (logsString != null) {
         final logsJson = jsonDecode(logsString) as List;
@@ -122,7 +140,7 @@ class LogService extends ChangeNotifier {
   Future<void> clearLogs() async {
     _logs.clear();
     notifyListeners();
-    
+
     try {
       if (_prefsInstance != null) {
         await _prefsInstance!.remove(_logsKey);
