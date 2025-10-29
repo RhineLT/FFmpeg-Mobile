@@ -1,0 +1,21 @@
+# FFmpeg Kit Flutter New - Proguard Rules
+# Keep all FFmpeg Kit classes
+-keep class com.arthenica.ffmpegkit.** { *; }
+-keep interface com.arthenica.ffmpegkit.** { *; }
+
+# Keep native methods
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
+# Keep Flutter plugin classes
+-keep class io.flutter.app.** { *; }
+-keep class io.flutter.plugin.**  { *; }
+-keep class io.flutter.util.**  { *; }
+-keep class io.flutter.view.**  { *; }
+-keep class io.flutter.**  { *; }
+-keep class io.flutter.plugins.**  { *; }
+
+# Prevent stripping of FFmpeg libraries
+-keep class com.arthenica.mobileffmpeg.** { *; }
+-dontwarn com.arthenica.mobileffmpeg.**
