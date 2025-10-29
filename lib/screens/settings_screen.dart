@@ -213,13 +213,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '⚠️ 注意: 当前使用的 video_compress 库不支持自定义分辨率\n'
-                          '输出分辨率由编码器自动控制，通常保持原始分辨率\n'
-                          '如需精确控制分辨率，需要升级到支持 FFmpeg 的版本',
+                          '✅ 分辨率设置已生效 (使用 FFmpeg Kit)\n'
+                          '选择输出视频的分辨率，降低分辨率可显著减小文件大小\n'
+                          '注意: 放大分辨率不会提升画质，建议不超过原始分辨率',
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.orange[700],
-                            fontStyle: FontStyle.italic,
+                            color: Colors.green[700],
                           ),
                         ),
                       ],

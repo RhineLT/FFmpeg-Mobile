@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
-import 'package:ffmpeg_kit_flutter_new/statistics.dart';
 import 'package:path/path.dart' as path;
 import '../models/video_task.dart';
 import '../models/compression_settings.dart';
@@ -23,13 +23,29 @@ class VideoCompressionService {
       logService.info('Starting compression for ${task.fileName}', taskId: task.id);
       
       // 读取原始视频信息
-      final mediaInfo = await VideoCompress.getMediaInfo(task.inputPath);
-      logService.info(
-        'Video info - Resolution: ${mediaInfo.width}x${mediaInfo.height}, '
-        'Duration: ${mediaInfo.duration?.toStringAsFixed(1)}s, '
-        'Bitrate: ${(mediaInfo.filesize! / (mediaInfo.duration ?? 1) / 1024).toStringAsFixed(0)} KB/s',
-        taskId: task.id,
-      );
+      final mediaInfoSession = await FFprobeKit.getMediaInformation(task.inputPath);
+      final mediaInfo = mediaInfoSession.getMediaInformation();
+      
+      if (mediaInfo != null) {
+        final properties = mediaInfo.getAllProperties();
+        final format = properties?['format'] as Map?;
+        
+        String videoInfo = 'Video info:';
+        if (format != null) {
+          final duration = format['duration'];
+          final bitrate = format['bit_rate'];
+          final size = format['size'];
+          videoInfo += '\n  Duration: ${duration}s';
+          if (bitrate != null) {
+            videoInfo += '\n  Bitrate: ${(int.tryParse(bitrate.toString()) ?? 0) / 1000} kbps';
+          }
+          if (size != null) {
+            videoInfo += '\n  Size: ${(int.tryParse(size.toString()) ?? 0) / 1024 / 1024} MB';
+          }
+        }
+        
+        logService.info(videoInfo, taskId: task.id);
+      }
       
       // Update status to processing
       final processingTask = task.copyWith(
@@ -45,110 +61,92 @@ class VideoCompressionService {
         logService.info('Created output directory: ${outputDir.path}', taskId: task.id);
       }
 
-      // Cancel any existing subscription before creating a new one
-      _progressSubscription?.unsubscribe();
+      // 构建 FFmpeg 命令
+      final command = _buildFFmpegCommand(
+        inputPath: task.inputPath,
+        outputPath: task.outputPath,
+        settings: settings,
+      );
       
-      // Subscribe to compression progress using the correct method
-      _progressSubscription = VideoCompress.compressProgress$.subscribe((progress) {
-        if (progress > 0) {
-          final normalizedProgress = (progress / 100.0).clamp(0.0, 0.99);
-          onProgress(normalizedProgress);
-          logService.debug('Compression progress: ${progress.toStringAsFixed(1)}%', taskId: task.id);
-        }
-      });
+      logService.info('FFmpeg command: ffmpeg $command', taskId: task.id);
 
-      // 根据设置确定输出分辨率
-      // 注意: video_compress 库不支持直接设置分辨率,分辨率由 VideoQuality 控制
-      // 这里仅记录用户设置,实际输出分辨率可能与设置不完全一致
-      if (settings.resolution != 'original') {
-        final parts = settings.resolution.split('x');
-        if (parts.length == 2) {
-          final targetWidth = int.tryParse(parts[0]);
-          final targetHeight = int.tryParse(parts[1]);
-          logService.warning(
-            'Target resolution: ${targetWidth}x$targetHeight\n'
-            'Note: video_compress library does not support custom resolution.\n'
-            'Output resolution is controlled by VideoQuality setting.',
-            taskId: task.id
+      // 执行 FFmpeg 压缩
+      final session = await FFmpegKit.executeAsync(
+        command,
+        (session) async {
+          final returnCode = await session.getReturnCode();
+          if (ReturnCode.isSuccess(returnCode)) {
+            logService.info('FFmpeg execution completed successfully', taskId: task.id);
+          } else if (ReturnCode.isCancel(returnCode)) {
+            logService.warning('FFmpeg execution cancelled', taskId: task.id);
+          } else {
+            final output = await session.getOutput();
+            logService.error('FFmpeg execution failed', taskId: task.id, error: output);
+          }
+        },
+        (log) {
+          final message = log.getMessage();
+          if (message.contains('error') || message.contains('Error')) {
+            logService.error('FFmpeg: $message', taskId: task.id);
+          } else {
+            logService.debug('FFmpeg: $message', taskId: task.id);
+          }
+        },
+        (statistics) {
+          final timeInMilliseconds = statistics.getTime();
+          if (timeInMilliseconds > 0 && mediaInfo != null) {
+            final properties = mediaInfo.getAllProperties();
+            final format = properties?['format'] as Map?;
+            final durationStr = format?['duration'];
+            
+            if (durationStr != null) {
+              final totalDuration = (double.tryParse(durationStr.toString()) ?? 0) * 1000;
+              if (totalDuration > 0) {
+                final prog = (timeInMilliseconds / totalDuration).clamp(0.0, 0.99);
+                onProgress(prog);
+              }
+            }
+          }
+        },
+      );
+
+      _currentSessionId = session.getSessionId();
+
+      // 等待执行完成
+      final returnCode = await session.getReturnCode();
+
+      if (ReturnCode.isSuccess(returnCode)) {
+        final outputFile = File(task.outputPath);
+        if (await outputFile.exists()) {
+          final outputSize = await outputFile.length();
+          
+          logService.info(
+            'Compression completed: ${task.fileName}\n'
+            'Original size: ${(task.fileSize / 1024 / 1024).toStringAsFixed(2)} MB\n'
+            'Compressed size: ${(outputSize / 1024 / 1024).toStringAsFixed(2)} MB\n'
+            'Compression ratio: ${((1 - outputSize / task.fileSize) * 100).toStringAsFixed(1)}%',
+            taskId: task.id,
           );
+
+          final completedTask = processingTask.copyWith(
+            status: VideoStatus.completed,
+            progress: 1.0,
+            completedAt: DateTime.now(),
+          );
+          onStatusChange(completedTask);
+        } else {
+          throw Exception('Output file not found after compression');
         }
+      } else if (ReturnCode.isCancel(returnCode)) {
+        final cancelledTask = processingTask.copyWith(
+          status: VideoStatus.pending,
+          progress: 0.0,
+        );
+        onStatusChange(cancelledTask);
       } else {
-        logService.info('Using original resolution: ${mediaInfo.width?.toInt()}x${mediaInfo.height?.toInt()}', taskId: task.id);
+        final output = await session.getOutput();
+        throw Exception('FFmpeg failed: $output');
       }
-
-      // 根据设置确定输出帧率
-      int outputFrameRate = 30; // 默认 30fps
-      if (settings.frameRate > 0) {
-        outputFrameRate = settings.frameRate;
-        logService.info('Target frame rate: $outputFrameRate fps', taskId: task.id);
-      } else {
-        // 使用原始帧率,但需要从视频信息中获取
-        // video_compress 要求帧率参数,如果原始信息中没有,使用30fps
-        logService.info('Using original frame rate: ~30 fps (video_compress default)', taskId: task.id);
-      }
-
-      logService.info('Starting video compression with settings: CRF=${settings.crf}, Preset=${settings.preset}, FrameRate=${outputFrameRate}fps', taskId: task.id);
-
-      // Compress video
-      // video_compress uses MediaCodec on Android and AVAssetExportSession on iOS
-      final info = await VideoCompress.compressVideo(
-        task.inputPath,
-        quality: VideoQuality.DefaultQuality,
-        deleteOrigin: false,
-        includeAudio: true,
-        frameRate: outputFrameRate,
-      );
-
-      if (info == null) {
-        throw Exception('Compression failed: no output file generated');
-      }
-
-      // Move the compressed file to the desired output path
-      final compressedFile = File(info.path!);
-      if (!await compressedFile.exists()) {
-        throw Exception('Compressed file not found at ${info.path}');
-      }
-
-      // Check if output file already exists and adjust name if needed
-      String finalOutputPath = task.outputPath;
-      if (await File(finalOutputPath).exists() && info.path != finalOutputPath) {
-        final dir = path.dirname(finalOutputPath);
-        final fileName = path.basename(finalOutputPath);
-        final nameWithoutExt = path.basenameWithoutExtension(fileName);
-        final ext = path.extension(fileName);
-        
-        int suffix = 1;
-        while (await File(finalOutputPath).exists()) {
-          finalOutputPath = path.join(dir, '${nameWithoutExt}_$suffix$ext');
-          suffix++;
-        }
-        
-        logService.info('Output file exists, using: ${path.basename(finalOutputPath)}', taskId: task.id);
-      }
-
-      // If output path is different, move the file
-      if (info.path != finalOutputPath) {
-        await compressedFile.copy(finalOutputPath);
-        await compressedFile.delete();
-      }
-
-      final outputFile = File(finalOutputPath);
-      final outputSize = await outputFile.length();
-      
-      logService.info(
-        'Compression completed: ${task.fileName}\n'
-        'Original size: ${(task.fileSize / 1024 / 1024).toStringAsFixed(2)} MB\n'
-        'Compressed size: ${(outputSize / 1024 / 1024).toStringAsFixed(2)} MB\n'
-        'Compression ratio: ${((1 - outputSize / task.fileSize) * 100).toStringAsFixed(1)}%',
-        taskId: task.id,
-      );
-
-      final completedTask = processingTask.copyWith(
-        status: VideoStatus.completed,
-        progress: 1.0,
-        completedAt: DateTime.now(),
-      );
-      onStatusChange(completedTask);
 
     } catch (e) {
       logService.error(
@@ -157,7 +155,6 @@ class VideoCompressionService {
         error: e,
       );
       
-      // Clean up incomplete output file
       final outputFile = File(task.outputPath);
       if (await outputFile.exists()) {
         await outputFile.delete();
@@ -169,14 +166,66 @@ class VideoCompressionService {
         errorMessage: e.toString(),
       );
       onStatusChange(failedTask);
+    } finally {
+      _currentSessionId = null;
     }
+  }
+
+  String _buildFFmpegCommand({
+    required String inputPath,
+    required String outputPath,
+    required CompressionSettings settings,
+  }) {
+    final List<String> args = [];
+
+    args.add('-i "$inputPath"');
+
+    if (settings.useHardwareAccel) {
+      if (Platform.isAndroid) {
+        args.add('-c:v hevc_mediacodec');
+      } else if (Platform.isIOS || Platform.isMacOS) {
+        args.add('-c:v hevc_videotoolbox');
+      } else {
+        args.add('-c:v libx265');
+      }
+    } else {
+      args.add('-c:v libx265');
+      args.add('-crf ${settings.crf}');
+      args.add('-preset ${settings.preset}');
+    }
+
+    if (settings.resolution != 'original') {
+      args.add('-s ${settings.resolution}');
+    }
+
+    if (settings.frameRate > 0) {
+      args.add('-r ${settings.frameRate}');
+    }
+
+    if (settings.maxBitrate > 0) {
+      args.add('-maxrate ${settings.maxBitrate}k');
+      args.add('-bufsize ${settings.maxBitrate * 2}k');
+    }
+
+    args.add('-c:a aac');
+    args.add('-b:a 128k');
+
+    if (settings.customParams.isNotEmpty) {
+      args.add(settings.customParams);
+    }
+
+    args.add('-y');
+    args.add('"$outputPath"');
+
+    return args.join(' ');
   }
 
   Future<void> cancelCompression(int sessionId) async {
     try {
-      _progressSubscription?.unsubscribe();
-      VideoCompress.cancelCompression();
-      logService.info('Cancelled compression');
+      if (_currentSessionId != null) {
+        await FFmpegKit.cancel(_currentSessionId!);
+        logService.info('Cancelled compression session: $_currentSessionId');
+      }
     } catch (e) {
       logService.error('Failed to cancel compression', error: e);
     }
@@ -184,8 +233,7 @@ class VideoCompressionService {
 
   Future<void> cancelAllSessions() async {
     try {
-      _progressSubscription?.unsubscribe();
-      VideoCompress.cancelCompression();
+      await FFmpegKit.cancel();
       logService.info('Cancelled all compression tasks');
     } catch (e) {
       logService.error('Failed to cancel all tasks', error: e);
@@ -193,23 +241,16 @@ class VideoCompressionService {
   }
 
   Future<void> dispose() async {
-    try {
-      _progressSubscription?.unsubscribe();
-      VideoCompress.dispose();
-    } catch (e) {
-      logService.error('Error disposing VideoCompress', error: e);
-    }
+    // FFmpeg Kit does not require disposal
   }
 
   String getOutputFileName(String inputFileName, int crf, String outputDir) {
     final nameWithoutExt = path.basenameWithoutExtension(inputFileName);
     final ext = path.extension(inputFileName);
     
-    // 生成基础文件名: 原名_batch{crf}.扩展名
     String baseFileName = '${nameWithoutExt}_batch$crf$ext';
     String outputPath = path.join(outputDir, baseFileName);
     
-    // 检查文件是否已存在，如果存在则添加编号后缀
     int suffix = 1;
     while (File(outputPath).existsSync()) {
       baseFileName = '${nameWithoutExt}_batch${crf}_$suffix$ext';
