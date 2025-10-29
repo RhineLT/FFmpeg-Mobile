@@ -17,6 +17,7 @@ class PermissionService {
       final List<Permission> permissionsToRequest = [
         Permission.videos,
         Permission.storage,
+        Permission.audio,
       ];
 
       if (Platform.isAndroid) {
@@ -29,10 +30,12 @@ class PermissionService {
 
       final videosGranted = statuses[Permission.videos]?.isGranted ?? false;
       final storageGranted = statuses[Permission.storage]?.isGranted ?? false;
+      final audioGranted = statuses[Permission.audio]?.isGranted ?? false;
       final manageGranted =
           statuses[Permission.manageExternalStorage]?.isGranted ?? false;
 
-      final granted = videosGranted || storageGranted || manageGranted;
+      final granted =
+          videosGranted || storageGranted || audioGranted || manageGranted;
 
       if (granted) {
         logService.info('Storage permissions granted');
@@ -52,6 +55,7 @@ class PermissionService {
     try {
       final videosStatus = await Permission.videos.status;
       final storageStatus = await Permission.storage.status;
+      final audioStatus = await Permission.audio.status;
       PermissionStatus? manageStatus;
       if (Platform.isAndroid) {
         manageStatus = await Permission.manageExternalStorage.status;
@@ -59,6 +63,7 @@ class PermissionService {
 
       return videosStatus.isGranted ||
           storageStatus.isGranted ||
+          audioStatus.isGranted ||
           (manageStatus?.isGranted ?? false);
     } catch (e) {
       logService.error('Error checking storage permissions', error: e);

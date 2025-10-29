@@ -54,6 +54,16 @@ class TaskManager extends ChangeNotifier {
       return;
     }
 
+    bool allowPublicDirectory = !Platform.isAndroid;
+    if (Platform.isAndroid) {
+      allowPublicDirectory = await permissionService.ensureStoragePermissions();
+      if (!allowPublicDirectory) {
+        logService.warning(
+          'Storage permissions not granted, using app-specific directory',
+        );
+      }
+    }
+
     // Load saved tasks
     _tasks.addAll(await storageService.loadTasks());
 
@@ -63,19 +73,23 @@ class TaskManager extends ChangeNotifier {
     // Load output directory
     _outputDirectory = await storageService.loadOutputDirectory();
 
-    // If no output directory is set, use default
-    if (_outputDirectory == null) {
-      bool allowPublicDirectory = !Platform.isAndroid;
-      if (Platform.isAndroid) {
-        allowPublicDirectory = await permissionService
-            .ensureStoragePermissions();
-        if (!allowPublicDirectory) {
-          logService.warning(
-            'Storage permissions not granted, using app-specific directory',
-          );
+    if (_outputDirectory != null && Platform.isAndroid) {
+      final isPublicPath = _outputDirectory!.startsWith('/storage/emulated/0/');
+      if (isPublicPath && !allowPublicDirectory) {
+        logService.warning(
+          'Existing public output directory not accessible without permissions. Using internal location instead.',
+        );
+        _outputDirectory = await _getDefaultOutputDirectory(
+          allowPublicDirectory: false,
+        );
+        if (_outputDirectory != null) {
+          await storageService.saveOutputDirectory(_outputDirectory!);
         }
       }
+    }
 
+    // If no output directory is set, use default
+    if (_outputDirectory == null) {
       _outputDirectory = await _getDefaultOutputDirectory(
         allowPublicDirectory: allowPublicDirectory,
       );
@@ -138,7 +152,7 @@ class TaskManager extends ChangeNotifier {
         final externalDir = await getExternalStorageDirectory();
         if (externalDir != null) {
           final fallbackDir = Directory(
-            path.join(externalDir.path, 'FFmpeg-Mobile'),
+            path.join(externalDir.path, 'Movies', 'FFmpeg-Mobile'),
           );
           if (!await fallbackDir.exists()) {
             await fallbackDir.create(recursive: true);
@@ -147,7 +161,9 @@ class TaskManager extends ChangeNotifier {
         }
 
         final docsDir = await getApplicationDocumentsDirectory();
-        final internalDir = Directory(path.join(docsDir.path, 'FFmpeg-Mobile'));
+        final internalDir = Directory(
+          path.join(docsDir.path, 'Movies', 'FFmpeg-Mobile'),
+        );
         if (!await internalDir.exists()) {
           await internalDir.create(recursive: true);
         }
