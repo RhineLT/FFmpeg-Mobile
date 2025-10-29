@@ -11,30 +11,57 @@ class PermissionService {
     try {
       logService.info('Requesting storage permissions');
 
-      // For Android 13+ (API 33+), use READ_MEDIA_VIDEO
-      // For Android 11+ (API 30+), try MANAGE_EXTERNAL_STORAGE
-      // For older versions, use READ_EXTERNAL_STORAGE
-      final Map<Permission, PermissionStatus> statuses = await [
-        Permission.videos,
-        Permission.storage,
-        Permission.manageExternalStorage,
-      ].request();
+      // Try to request permissions one by one to avoid issues
+      bool granted = false;
+      
+      // Try videos permission first (Android 13+)
+      try {
+        final videosStatus = await Permission.videos.request();
+        if (videosStatus.isGranted) {
+          logService.info('Videos permission granted');
+          granted = true;
+        }
+      } catch (e) {
+        logService.warning('Videos permission not available: $e');
+      }
 
-      final videosGranted = statuses[Permission.videos]?.isGranted ?? false;
-      final storageGranted = statuses[Permission.storage]?.isGranted ?? false;
-      final manageStorageGranted = statuses[Permission.manageExternalStorage]?.isGranted ?? false;
+      // Try storage permission (Android 12 and below)
+      if (!granted) {
+        try {
+          final storageStatus = await Permission.storage.request();
+          if (storageStatus.isGranted) {
+            logService.info('Storage permission granted');
+            granted = true;
+          }
+        } catch (e) {
+          logService.warning('Storage permission not available: $e');
+        }
+      }
 
-      final granted = videosGranted || storageGranted || manageStorageGranted;
+      // Try manage external storage (Android 11+)
+      if (!granted) {
+        try {
+          final manageStatus = await Permission.manageExternalStorage.request();
+          if (manageStatus.isGranted) {
+            logService.info('Manage external storage permission granted');
+            granted = true;
+          } else {
+            logService.warning('Manage external storage permission denied or not available');
+          }
+        } catch (e) {
+          logService.warning('Manage external storage permission not available: $e');
+        }
+      }
 
       if (granted) {
         logService.info('Storage permissions granted');
       } else {
-        logService.warning('Storage permissions denied');
+        logService.warning('All storage permissions denied or unavailable');
       }
 
       return granted;
-    } catch (e) {
-      logService.error('Error requesting storage permissions', error: e);
+    } catch (e, stackTrace) {
+      logService.error('Error requesting storage permissions: $e\nStackTrace: $stackTrace', error: e);
       return false;
     }
   }
@@ -42,13 +69,49 @@ class PermissionService {
   /// Check if storage permissions are granted
   Future<bool> hasStoragePermissions() async {
     try {
-      final videosStatus = await Permission.videos.status;
-      final storageStatus = await Permission.storage.status;
-      final manageStorageStatus = await Permission.manageExternalStorage.status;
+      // Check each permission individually to avoid issues
+      bool hasPermission = false;
 
-      return videosStatus.isGranted || storageStatus.isGranted || manageStorageStatus.isGranted;
-    } catch (e) {
-      logService.error('Error checking storage permissions', error: e);
+      // Check videos permission (Android 13+)
+      try {
+        final videosStatus = await Permission.videos.status;
+        if (videosStatus.isGranted) {
+          logService.info('Videos permission is granted');
+          hasPermission = true;
+        }
+      } catch (e) {
+        logService.warning('Cannot check videos permission: $e');
+      }
+
+      // Check storage permission (Android 12 and below)
+      if (!hasPermission) {
+        try {
+          final storageStatus = await Permission.storage.status;
+          if (storageStatus.isGranted) {
+            logService.info('Storage permission is granted');
+            hasPermission = true;
+          }
+        } catch (e) {
+          logService.warning('Cannot check storage permission: $e');
+        }
+      }
+
+      // Check manage external storage (Android 11+)
+      if (!hasPermission) {
+        try {
+          final manageStorageStatus = await Permission.manageExternalStorage.status;
+          if (manageStorageStatus.isGranted) {
+            logService.info('Manage external storage permission is granted');
+            hasPermission = true;
+          }
+        } catch (e) {
+          logService.warning('Cannot check manage external storage permission: $e');
+        }
+      }
+
+      return hasPermission;
+    } catch (e, stackTrace) {
+      logService.error('Error checking storage permissions: $e\nStackTrace: $stackTrace', error: e);
       return false;
     }
   }

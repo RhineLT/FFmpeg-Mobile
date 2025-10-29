@@ -51,87 +51,132 @@ class TaskManager extends ChangeNotifier {
 
   Future<void> init() async {
     if (_initialized) {
+      logService.info('TaskManager already initialized');
       return;
     }
 
-    // Load saved tasks
-    _tasks.addAll(await storageService.loadTasks());
+    try {
+      // Load saved tasks
+      logService.info('Loading saved tasks...');
+      final savedTasks = await storageService.loadTasks();
+      _tasks.addAll(savedTasks);
+      logService.info('Loaded ${savedTasks.length} saved tasks');
 
-    // Load compression settings
-    _compressionSettings = await storageService.loadCompressionSettings();
+      // Load compression settings
+      logService.info('Loading compression settings...');
+      _compressionSettings = await storageService.loadCompressionSettings();
+      logService.info('Compression settings loaded: ${_compressionSettings.commandPreview}');
 
-    // Load output directory
-    _outputDirectory = await storageService.loadOutputDirectory();
-
-    // If no output directory is set, use default
-    if (_outputDirectory == null) {
-      _outputDirectory = await _getDefaultOutputDirectory();
+      // Load output directory
+      logService.info('Loading output directory...');
+      _outputDirectory = await storageService.loadOutputDirectory();
       if (_outputDirectory != null) {
-        await storageService.saveOutputDirectory(_outputDirectory!);
-      } else {
-        logService.error('Failed to resolve default output directory');
+        logService.info('Loaded output directory: $_outputDirectory');
       }
-    }
 
-    logService.info('Task manager initialized with ${_tasks.length} tasks');
-    logService.info(
-      'Compression settings: ${_compressionSettings.commandPreview}',
-    );
-
-    // Reset any tasks that were processing when app was closed
-    for (var task in _tasks) {
-      if (task.status == VideoStatus.processing) {
-        task.status = VideoStatus.pending;
-        task.progress = 0.0;
-        task.sessionId = null;
-        logService.info(
-          'Reset task ${task.fileName} to pending',
-          taskId: task.id,
-        );
+      // If no output directory is set, use default
+      if (_outputDirectory == null) {
+        logService.info('No saved output directory, getting default...');
+        _outputDirectory = await _getDefaultOutputDirectory();
+        if (_outputDirectory != null) {
+          logService.info('Default output directory set: $_outputDirectory');
+          await storageService.saveOutputDirectory(_outputDirectory!);
+        } else {
+          logService.warning('Failed to resolve default output directory - will need to set manually');
+        }
       }
-    }
 
-    _initialized = true;
-    await _saveTasks();
-    notifyListeners();
+      // Reset any tasks that were processing when app was closed
+      int resetCount = 0;
+      for (var task in _tasks) {
+        if (task.status == VideoStatus.processing) {
+          task.status = VideoStatus.pending;
+          task.progress = 0.0;
+          task.sessionId = null;
+          resetCount++;
+          logService.info(
+            'Reset task ${task.fileName} to pending',
+            taskId: task.id,
+          );
+        }
+      }
+      if (resetCount > 0) {
+        logService.info('Reset $resetCount processing tasks to pending');
+      }
+
+      _initialized = true;
+      await _saveTasks();
+      
+      logService.info('Task manager initialized successfully with ${_tasks.length} tasks');
+      
+      notifyListeners();
+    } catch (e, stackTrace) {
+      logService.error('Failed to initialize TaskManager: $e\nStackTrace: $stackTrace', error: e);
+      _initialized = true; // Mark as initialized anyway to allow app to continue
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<String?> _getDefaultOutputDirectory() async {
     try {
+      logService.info('Getting default output directory...');
+      
       if (Platform.isAndroid) {
         // Try app-specific external storage directory first
-        final externalDir = await getExternalStorageDirectory();
-        if (externalDir != null) {
-          final outputDir = Directory(
-            path.join(externalDir.path, 'Movies', 'FFmpeg-Mobile'),
-          );
-          if (!await outputDir.exists()) {
-            await outputDir.create(recursive: true);
+        try {
+          final externalDir = await getExternalStorageDirectory();
+          if (externalDir != null) {
+            logService.info('External storage directory: ${externalDir.path}');
+            final outputDir = Directory(
+              path.join(externalDir.path, 'Movies', 'FFmpeg-Mobile'),
+            );
+            if (!await outputDir.exists()) {
+              await outputDir.create(recursive: true);
+              logService.info('Created output directory: ${outputDir.path}');
+            }
+            logService.info('Using external storage output directory: ${outputDir.path}');
+            return outputDir.path;
           }
-          return outputDir.path;
+        } catch (e) {
+          logService.warning('Failed to access external storage: $e');
         }
 
         // Fallback to documents directory
-        final docsDir = await getApplicationDocumentsDirectory();
-        final internalDir = Directory(
-          path.join(docsDir.path, 'Movies', 'FFmpeg-Mobile'),
-        );
-        if (!await internalDir.exists()) {
-          await internalDir.create(recursive: true);
+        try {
+          final docsDir = await getApplicationDocumentsDirectory();
+          logService.info('Documents directory: ${docsDir.path}');
+          final internalDir = Directory(
+            path.join(docsDir.path, 'Movies', 'FFmpeg-Mobile'),
+          );
+          if (!await internalDir.exists()) {
+            await internalDir.create(recursive: true);
+            logService.info('Created internal output directory: ${internalDir.path}');
+          }
+          logService.info('Using internal storage output directory: ${internalDir.path}');
+          return internalDir.path;
+        } catch (e) {
+          logService.error('Failed to access documents directory: $e', error: e);
         }
-        return internalDir.path;
       } else if (Platform.isIOS) {
         // For iOS, use documents directory
-        final directory = await getApplicationDocumentsDirectory();
-        final outputDir = Directory('${directory.path}/CompressedVideos');
-        if (!await outputDir.exists()) {
-          await outputDir.create(recursive: true);
+        try {
+          final directory = await getApplicationDocumentsDirectory();
+          final outputDir = Directory('${directory.path}/CompressedVideos');
+          if (!await outputDir.exists()) {
+            await outputDir.create(recursive: true);
+          }
+          logService.info('Using iOS output directory: ${outputDir.path}');
+          return outputDir.path;
+        } catch (e) {
+          logService.error('Failed to get iOS output directory: $e', error: e);
         }
-        return outputDir.path;
       }
-    } catch (e) {
-      logService.error('Failed to get default output directory', error: e);
+    } catch (e, stackTrace) {
+      logService.error('Failed to get default output directory: $e\nStackTrace: $stackTrace', error: e);
     }
+    
+    logService.error('Could not resolve any output directory');
     return null;
   }
 

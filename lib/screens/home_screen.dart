@@ -5,6 +5,7 @@ import '../widgets/task_list.dart';
 import '../widgets/stats_card.dart';
 import 'logs_screen.dart';
 import 'settings_screen.dart';
+import 'permission_diagnostic_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -16,6 +17,16 @@ class HomeScreen extends StatelessWidget {
         title: const Text('FFmpeg-Mobile'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.security),
+            tooltip: '权限诊断',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const PermissionDiagnosticScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: '压缩设置',
