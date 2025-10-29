@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'log_service.dart';
 
@@ -13,15 +14,25 @@ class PermissionService {
 
       // For Android 13+ (API 33+), use READ_MEDIA_VIDEO
       // For older versions, use READ_EXTERNAL_STORAGE
-      final Map<Permission, PermissionStatus> statuses = await [
+      final List<Permission> permissionsToRequest = [
         Permission.videos,
         Permission.storage,
-      ].request();
+      ];
+
+      if (Platform.isAndroid) {
+        // MANAGE_EXTERNAL_STORAGE is needed to write to shared storage on API 30+
+        permissionsToRequest.add(Permission.manageExternalStorage);
+      }
+
+      final Map<Permission, PermissionStatus> statuses =
+          await permissionsToRequest.request();
 
       final videosGranted = statuses[Permission.videos]?.isGranted ?? false;
       final storageGranted = statuses[Permission.storage]?.isGranted ?? false;
+      final manageGranted =
+          statuses[Permission.manageExternalStorage]?.isGranted ?? false;
 
-      final granted = videosGranted || storageGranted;
+      final granted = videosGranted || storageGranted || manageGranted;
 
       if (granted) {
         logService.info('Storage permissions granted');
@@ -41,12 +52,32 @@ class PermissionService {
     try {
       final videosStatus = await Permission.videos.status;
       final storageStatus = await Permission.storage.status;
+      PermissionStatus? manageStatus;
+      if (Platform.isAndroid) {
+        manageStatus = await Permission.manageExternalStorage.status;
+      }
 
-      return videosStatus.isGranted || storageStatus.isGranted;
+      return videosStatus.isGranted ||
+          storageStatus.isGranted ||
+          (manageStatus?.isGranted ?? false);
     } catch (e) {
       logService.error('Error checking storage permissions', error: e);
       return false;
     }
+  }
+
+  /// Ensure the app has storage permissions, requesting them if necessary
+  Future<bool> ensureStoragePermissions() async {
+    final hasPermissions = await hasStoragePermissions();
+    if (hasPermissions) {
+      return true;
+    }
+
+    final granted = await requestStoragePermissions();
+    if (!granted) {
+      logService.warning('Storage permissions not granted after request');
+    }
+    return granted;
   }
 
   /// Open app settings for manual permission grant
