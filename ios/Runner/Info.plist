@@ -49,5 +49,11 @@
 	<string>需要访问照片库以选择要压缩的视频文件</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>需要访问照片库以保存压缩后的视频</string>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
 </dict>
 </plist>

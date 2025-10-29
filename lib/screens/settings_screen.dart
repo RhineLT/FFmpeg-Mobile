@@ -180,6 +180,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 
                 const SizedBox(height: 24),
                 
+                // Resolution Setting
+                _buildSectionTitle('分辨率设置'),
+                const SizedBox(height: 8),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          initialValue: settings.resolution,
+                          decoration: const InputDecoration(
+                            labelText: '输出分辨率',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: CompressionSettings.availableResolutions.map((res) {
+                            return DropdownMenuItem(
+                              value: res,
+                              child: Text(
+                                CompressionSettings.resolutionDescriptions[res] ?? res,
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              taskManager.updateCompressionSettings(
+                                settings.copyWith(resolution: value),
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '选择输出视频的分辨率，降低分辨率可显著减小文件大小',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Frame Rate Setting
+                _buildSectionTitle('帧率设置'),
+                const SizedBox(height: 8),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<int>(
+                          initialValue: settings.frameRate,
+                          decoration: const InputDecoration(
+                            labelText: '输出帧率',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: CompressionSettings.availableFrameRates.map((fps) {
+                            return DropdownMenuItem(
+                              value: fps,
+                              child: Text(
+                                CompressionSettings.getFrameRateDescription(fps),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              taskManager.updateCompressionSettings(
+                                settings.copyWith(frameRate: value),
+                              );
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '降低帧率可以减小文件大小，但可能影响流畅度',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(height: 24),
+                
                 // Bitrate Limit
                 _buildSectionTitle('码率限制 (可选)'),
                 const SizedBox(height: 8),

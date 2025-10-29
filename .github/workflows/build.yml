@@ -41,27 +41,13 @@ jobs:
         run: flutter test
         continue-on-error: true  # 目前可能没有测试
       
-      - name: Build Android Debug APK
-        run: |
-          cd android
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
-        env:
-          GRADLE_OPTS: -Xmx4g -Dorg.gradle.daemon=false
-      
       - name: Build Android Release APK
         run: |
           cd android
+          chmod +x ./gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace
         env:
           GRADLE_OPTS: -Xmx4g -Dorg.gradle.daemon=false
-      
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 30
       
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
