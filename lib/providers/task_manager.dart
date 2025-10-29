@@ -8,13 +8,13 @@ import '../models/compression_settings.dart';
 import '../services/log_service.dart';
 import '../services/storage_service.dart';
 import '../services/video_compression_service.dart';
-import '../services/permission_service.dart';
+import '../services/simple_permission_service.dart';
 
 class TaskManager extends ChangeNotifier {
   final LogService logService;
   final StorageService storageService;
   late final VideoCompressionService compressionService;
-  late final PermissionService permissionService;
+  late final SimplePermissionService permissionService;
 
   final List<VideoTask> _tasks = [];
   String? _outputDirectory;
@@ -46,7 +46,7 @@ class TaskManager extends ChangeNotifier {
 
   TaskManager({required this.logService, required this.storageService}) {
     compressionService = VideoCompressionService(logService: logService);
-    permissionService = PermissionService(logService: logService);
+    permissionService = SimplePermissionService(logService: logService);
   }
 
   Future<void> init() async {
@@ -123,43 +123,34 @@ class TaskManager extends ChangeNotifier {
       logService.info('Getting default output directory...');
       
       if (Platform.isAndroid) {
-        // Try app-specific external storage directory first
+        // 简化版本：直接使用固定路径
         try {
-          final externalDir = await getExternalStorageDirectory();
-          if (externalDir != null) {
-            logService.info('External storage directory: ${externalDir.path}');
-            final outputDir = Directory(
-              path.join(externalDir.path, 'Movies', 'FFmpeg-Mobile'),
-            );
+          // 尝试使用 /storage/emulated/0/Movies/FFmpeg-Mobile
+          final outputDir = Directory('/storage/emulated/0/Movies/FFmpeg-Mobile');
+          if (!await outputDir.exists()) {
+            await outputDir.create(recursive: true);
+            logService.info('Created output directory: ${outputDir.path}');
+          }
+          logService.info('Using default output directory: ${outputDir.path}');
+          return outputDir.path;
+        } catch (e) {
+          logService.warning('Failed to create default Movies directory: $e');
+          
+          // 回退到 Downloads 目录
+          try {
+            final outputDir = Directory('/storage/emulated/0/Download/FFmpeg-Mobile');
             if (!await outputDir.exists()) {
               await outputDir.create(recursive: true);
-              logService.info('Created output directory: ${outputDir.path}');
+              logService.info('Created output directory in Downloads: ${outputDir.path}');
             }
-            logService.info('Using external storage output directory: ${outputDir.path}');
+            logService.info('Using Downloads output directory: ${outputDir.path}');
             return outputDir.path;
+          } catch (e2) {
+            logService.error('Failed to create Downloads directory: $e2');
           }
-        } catch (e) {
-          logService.warning('Failed to access external storage: $e');
-        }
-
-        // Fallback to documents directory
-        try {
-          final docsDir = await getApplicationDocumentsDirectory();
-          logService.info('Documents directory: ${docsDir.path}');
-          final internalDir = Directory(
-            path.join(docsDir.path, 'Movies', 'FFmpeg-Mobile'),
-          );
-          if (!await internalDir.exists()) {
-            await internalDir.create(recursive: true);
-            logService.info('Created internal output directory: ${internalDir.path}');
-          }
-          logService.info('Using internal storage output directory: ${internalDir.path}');
-          return internalDir.path;
-        } catch (e) {
-          logService.error('Failed to access documents directory: $e', error: e);
         }
       } else if (Platform.isIOS) {
-        // For iOS, use documents directory
+        // iOS 使用 path_provider
         try {
           final directory = await getApplicationDocumentsDirectory();
           final outputDir = Directory('${directory.path}/CompressedVideos');
@@ -176,7 +167,7 @@ class TaskManager extends ChangeNotifier {
       logService.error('Failed to get default output directory: $e\nStackTrace: $stackTrace', error: e);
     }
     
-    logService.error('Could not resolve any output directory');
+    logService.warning('Could not resolve any output directory - user must set manually');
     return null;
   }
 
@@ -196,15 +187,8 @@ class TaskManager extends ChangeNotifier {
 
   Future<void> pickVideos() async {
     try {
-      // Check and request permissions first
-      final hasPermission = await permissionService.hasStoragePermissions();
-      if (!hasPermission) {
-        final granted = await permissionService.requestStoragePermissions();
-        if (!granted) {
-          logService.error('Storage permission denied');
-          return;
-        }
-      }
+      // FilePicker will handle permissions automatically
+      logService.info('Opening file picker for videos...');
 
       final result = await FilePicker.platform.pickFiles(
         type: FileType.video,
