@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.videocompressor.video_compressor"
-    compileSdk = 34  // Compile against Android 14 SDK
+    compileSdk = 36  // Compile against Android 16 SDK
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -25,7 +25,7 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24  // FFmpeg requires minimum SDK 24
-        targetSdk = 34  // Target Android 14 for latest features and security
+        targetSdk = 36  // Target Android 16 for latest features and security
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

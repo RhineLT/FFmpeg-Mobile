@@ -12,17 +12,19 @@ class PermissionService {
       logService.info('Requesting storage permissions');
 
       // For Android 13+ (API 33+), use READ_MEDIA_VIDEO
+      // For Android 11+ (API 30+), try MANAGE_EXTERNAL_STORAGE
       // For older versions, use READ_EXTERNAL_STORAGE
-      // Request both and let the system handle which one to use
       final Map<Permission, PermissionStatus> statuses = await [
         Permission.videos,
         Permission.storage,
+        Permission.manageExternalStorage,
       ].request();
 
       final videosGranted = statuses[Permission.videos]?.isGranted ?? false;
       final storageGranted = statuses[Permission.storage]?.isGranted ?? false;
+      final manageStorageGranted = statuses[Permission.manageExternalStorage]?.isGranted ?? false;
 
-      final granted = videosGranted || storageGranted;
+      final granted = videosGranted || storageGranted || manageStorageGranted;
 
       if (granted) {
         logService.info('Storage permissions granted');
@@ -42,8 +44,9 @@ class PermissionService {
     try {
       final videosStatus = await Permission.videos.status;
       final storageStatus = await Permission.storage.status;
+      final manageStorageStatus = await Permission.manageExternalStorage.status;
 
-      return videosStatus.isGranted || storageStatus.isGranted;
+      return videosStatus.isGranted || storageStatus.isGranted || manageStorageStatus.isGranted;
     } catch (e) {
       logService.error('Error checking storage permissions', error: e);
       return false;
