@@ -10,7 +10,7 @@ import 'log_service.dart';
 class VideoCompressionService {
   final LogService logService;
   int? _currentSessionId;
-  
+
   VideoCompressionService({required this.logService});
 
   Future<void> compressVideo({
@@ -20,16 +20,21 @@ class VideoCompressionService {
     required Function(VideoTask updatedTask) onStatusChange,
   }) async {
     try {
-      logService.info('Starting compression for ${task.fileName}', taskId: task.id);
-      
+      logService.info(
+        'Starting compression for ${task.fileName}',
+        taskId: task.id,
+      );
+
       // 读取原始视频信息
-      final mediaInfoSession = await FFprobeKit.getMediaInformation(task.inputPath);
+      final mediaInfoSession = await FFprobeKit.getMediaInformation(
+        task.inputPath,
+      );
       final mediaInfo = mediaInfoSession.getMediaInformation();
-      
+
       if (mediaInfo != null) {
         final properties = mediaInfo.getAllProperties();
         final format = properties?['format'] as Map?;
-        
+
         String videoInfo = 'Video info:';
         if (format != null) {
           final duration = format['duration'];
@@ -37,16 +42,18 @@ class VideoCompressionService {
           final size = format['size'];
           videoInfo += '\n  Duration: ${duration}s';
           if (bitrate != null) {
-            videoInfo += '\n  Bitrate: ${(int.tryParse(bitrate.toString()) ?? 0) / 1000} kbps';
+            videoInfo +=
+                '\n  Bitrate: ${(int.tryParse(bitrate.toString()) ?? 0) / 1000} kbps';
           }
           if (size != null) {
-            videoInfo += '\n  Size: ${(int.tryParse(size.toString()) ?? 0) / 1024 / 1024} MB';
+            videoInfo +=
+                '\n  Size: ${(int.tryParse(size.toString()) ?? 0) / 1024 / 1024} MB';
           }
         }
-        
+
         logService.info(videoInfo, taskId: task.id);
       }
-      
+
       // Update status to processing
       final processingTask = task.copyWith(
         status: VideoStatus.processing,
@@ -58,7 +65,10 @@ class VideoCompressionService {
       final outputDir = Directory(path.dirname(task.outputPath));
       if (!await outputDir.exists()) {
         await outputDir.create(recursive: true);
-        logService.info('Created output directory: ${outputDir.path}', taskId: task.id);
+        logService.info(
+          'Created output directory: ${outputDir.path}',
+          taskId: task.id,
+        );
       }
 
       // 构建 FFmpeg 命令
@@ -67,7 +77,7 @@ class VideoCompressionService {
         outputPath: task.outputPath,
         settings: settings,
       );
-      
+
       logService.info('FFmpeg command: ffmpeg $command', taskId: task.id);
 
       // 执行 FFmpeg 压缩
@@ -76,12 +86,19 @@ class VideoCompressionService {
         (session) async {
           final returnCode = await session.getReturnCode();
           if (ReturnCode.isSuccess(returnCode)) {
-            logService.info('FFmpeg execution completed successfully', taskId: task.id);
+            logService.info(
+              'FFmpeg execution completed successfully',
+              taskId: task.id,
+            );
           } else if (ReturnCode.isCancel(returnCode)) {
             logService.warning('FFmpeg execution cancelled', taskId: task.id);
           } else {
             final output = await session.getOutput();
-            logService.error('FFmpeg execution failed', taskId: task.id, error: output);
+            logService.error(
+              'FFmpeg execution failed',
+              taskId: task.id,
+              error: output,
+            );
           }
         },
         (log) {
@@ -98,11 +115,15 @@ class VideoCompressionService {
             final properties = mediaInfo.getAllProperties();
             final format = properties?['format'] as Map?;
             final durationStr = format?['duration'];
-            
+
             if (durationStr != null) {
-              final totalDuration = (double.tryParse(durationStr.toString()) ?? 0) * 1000;
+              final totalDuration =
+                  (double.tryParse(durationStr.toString()) ?? 0) * 1000;
               if (totalDuration > 0) {
-                final prog = (timeInMilliseconds / totalDuration).clamp(0.0, 0.99);
+                final prog = (timeInMilliseconds / totalDuration).clamp(
+                  0.0,
+                  0.99,
+                );
                 onProgress(prog);
               }
             }
@@ -111,6 +132,7 @@ class VideoCompressionService {
       );
 
       _currentSessionId = session.getSessionId();
+      onStatusChange(processingTask.copyWith(sessionId: _currentSessionId));
 
       // 等待执行完成
       final returnCode = await session.getReturnCode();
@@ -119,7 +141,7 @@ class VideoCompressionService {
         final outputFile = File(task.outputPath);
         if (await outputFile.exists()) {
           final outputSize = await outputFile.length();
-          
+
           logService.info(
             'Compression completed: ${task.fileName}\n'
             'Original size: ${(task.fileSize / 1024 / 1024).toStringAsFixed(2)} MB\n'
@@ -132,6 +154,7 @@ class VideoCompressionService {
             status: VideoStatus.completed,
             progress: 1.0,
             completedAt: DateTime.now(),
+            sessionId: null,
           );
           onStatusChange(completedTask);
         } else {
@@ -141,29 +164,56 @@ class VideoCompressionService {
         final cancelledTask = processingTask.copyWith(
           status: VideoStatus.pending,
           progress: 0.0,
+          sessionId: null,
         );
         onStatusChange(cancelledTask);
       } else {
         final output = await session.getOutput();
         throw Exception('FFmpeg failed: $output');
       }
-
     } catch (e) {
-      logService.error(
-        'Exception during compression for ${task.fileName}', 
-        taskId: task.id, 
-        error: e,
-      );
-      
       final outputFile = File(task.outputPath);
       if (await outputFile.exists()) {
         await outputFile.delete();
         logService.debug('Deleted incomplete output file', taskId: task.id);
       }
-      
+
+      final errorDescription = e.toString();
+
+      if (settings.useHardwareAccel &&
+          _shouldFallbackToSoftware(errorDescription)) {
+        logService.warning(
+          'Hardware acceleration failed, retrying with software encoder',
+          taskId: task.id,
+        );
+
+        final resetTask = task.copyWith(
+          status: VideoStatus.pending,
+          progress: 0.0,
+          errorMessage: null,
+          sessionId: null,
+        );
+        onStatusChange(resetTask);
+
+        await compressVideo(
+          task: resetTask,
+          settings: settings.copyWith(useHardwareAccel: false),
+          onProgress: onProgress,
+          onStatusChange: onStatusChange,
+        );
+        return;
+      }
+
+      logService.error(
+        'Exception during compression for ${task.fileName}',
+        taskId: task.id,
+        error: e,
+      );
+
       final failedTask = task.copyWith(
         status: VideoStatus.failed,
-        errorMessage: e.toString(),
+        errorMessage: errorDescription,
+        sessionId: null,
       );
       onStatusChange(failedTask);
     } finally {
@@ -222,9 +272,11 @@ class VideoCompressionService {
 
   Future<void> cancelCompression(int sessionId) async {
     try {
-      if (_currentSessionId != null) {
-        await FFmpegKit.cancel(_currentSessionId!);
-        logService.info('Cancelled compression session: $_currentSessionId');
+      await FFmpegKit.cancel(sessionId);
+      logService.info('Cancelled compression session: $sessionId');
+
+      if (_currentSessionId == sessionId) {
+        _currentSessionId = null;
       }
     } catch (e) {
       logService.error('Failed to cancel compression', error: e);
@@ -235,6 +287,7 @@ class VideoCompressionService {
     try {
       await FFmpegKit.cancel();
       logService.info('Cancelled all compression tasks');
+      _currentSessionId = null;
     } catch (e) {
       logService.error('Failed to cancel all tasks', error: e);
     }
@@ -247,17 +300,31 @@ class VideoCompressionService {
   String getOutputFileName(String inputFileName, int crf, String outputDir) {
     final nameWithoutExt = path.basenameWithoutExtension(inputFileName);
     final ext = path.extension(inputFileName);
-    
+
     String baseFileName = '${nameWithoutExt}_batch$crf$ext';
     String outputPath = path.join(outputDir, baseFileName);
-    
+
     int suffix = 1;
     while (File(outputPath).existsSync()) {
       baseFileName = '${nameWithoutExt}_batch${crf}_$suffix$ext';
       outputPath = path.join(outputDir, baseFileName);
       suffix++;
     }
-    
+
     return baseFileName;
+  }
+
+  bool _shouldFallbackToSoftware(String error) {
+    final message = error.toLowerCase();
+    if (message.contains('mediacodec') || message.contains('videotoolbox')) {
+      return true;
+    }
+    if (message.contains('hardware') && message.contains('fail')) {
+      return true;
+    }
+    if (message.contains('unknown encoder') && message.contains('hevc')) {
+      return true;
+    }
+    return false;
   }
 }

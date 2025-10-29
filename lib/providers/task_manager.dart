@@ -21,16 +21,21 @@ class TaskManager extends ChangeNotifier {
   bool _isProcessing = false;
   VideoTask? _currentTask;
   CompressionSettings _compressionSettings = CompressionSettings();
+  bool _initialized = false;
 
   List<VideoTask> get tasks => List.unmodifiable(_tasks);
   String? get outputDirectory => _outputDirectory;
   bool get isProcessing => _isProcessing;
   VideoTask? get currentTask => _currentTask;
   CompressionSettings get compressionSettings => _compressionSettings;
-  
-  int get pendingCount => _tasks.where((t) => t.status == VideoStatus.pending).length;
-  int get completedCount => _tasks.where((t) => t.status == VideoStatus.completed).length;
-  int get failedCount => _tasks.where((t) => t.status == VideoStatus.failed).length;
+  bool get initialized => _initialized;
+
+  int get pendingCount =>
+      _tasks.where((t) => t.status == VideoStatus.pending).length;
+  int get completedCount =>
+      _tasks.where((t) => t.status == VideoStatus.completed).length;
+  int get failedCount =>
+      _tasks.where((t) => t.status == VideoStatus.failed).length;
 
   void updateCompressionSettings(CompressionSettings settings) {
     _compressionSettings = settings;
@@ -39,24 +44,25 @@ class TaskManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  TaskManager({
-    required this.logService,
-    required this.storageService,
-  }) {
+  TaskManager({required this.logService, required this.storageService}) {
     compressionService = VideoCompressionService(logService: logService);
     permissionService = PermissionService(logService: logService);
   }
 
   Future<void> init() async {
+    if (_initialized) {
+      return;
+    }
+
     // Load saved tasks
     _tasks.addAll(await storageService.loadTasks());
-    
+
     // Load compression settings
     _compressionSettings = await storageService.loadCompressionSettings();
-    
+
     // Load output directory
     _outputDirectory = await storageService.loadOutputDirectory();
-    
+
     // If no output directory is set, use default
     if (_outputDirectory == null) {
       _outputDirectory = await _getDefaultOutputDirectory();
@@ -64,20 +70,26 @@ class TaskManager extends ChangeNotifier {
         await storageService.saveOutputDirectory(_outputDirectory!);
       }
     }
-    
+
     logService.info('Task manager initialized with ${_tasks.length} tasks');
-    logService.info('Compression settings: ${_compressionSettings.commandPreview}');
-    
+    logService.info(
+      'Compression settings: ${_compressionSettings.commandPreview}',
+    );
+
     // Reset any tasks that were processing when app was closed
     for (var task in _tasks) {
       if (task.status == VideoStatus.processing) {
         task.status = VideoStatus.pending;
         task.progress = 0.0;
         task.sessionId = null;
-        logService.info('Reset task ${task.fileName} to pending', taskId: task.id);
+        logService.info(
+          'Reset task ${task.fileName} to pending',
+          taskId: task.id,
+        );
       }
     }
-    
+
+    _initialized = true;
     await _saveTasks();
     notifyListeners();
   }
@@ -89,7 +101,7 @@ class TaskManager extends ChangeNotifier {
         // This is /storage/emulated/0/Movies/FFmpeg-Mobile/
         const publicPath = '/storage/emulated/0/Movies/FFmpeg-Mobile';
         final outputDir = Directory(publicPath);
-        
+
         try {
           if (!await outputDir.exists()) {
             await outputDir.create(recursive: true);
@@ -98,7 +110,9 @@ class TaskManager extends ChangeNotifier {
           return outputDir.path;
         } catch (e) {
           // If we can't create in public directory, fall back to external storage
-          logService.warning('Cannot create public directory, using fallback: $e');
+          logService.warning(
+            'Cannot create public directory, using fallback: $e',
+          );
           final directory = await getExternalStorageDirectory();
           if (directory != null) {
             // Try to use a path closer to root
@@ -176,7 +190,8 @@ class TaskManager extends ChangeNotifier {
             final fileSize = File(file.path!).lengthSync();
 
             final task = VideoTask(
-              id: DateTime.now().millisecondsSinceEpoch.toString() + 
+              id:
+                  DateTime.now().millisecondsSinceEpoch.toString() +
                   _tasks.length.toString(),
               inputPath: file.path!,
               outputPath: outputPath,
@@ -185,13 +200,16 @@ class TaskManager extends ChangeNotifier {
             );
 
             _tasks.add(task);
-            logService.info('Added task: $fileName (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)', taskId: task.id);
+            logService.info(
+              'Added task: $fileName (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)',
+              taskId: task.id,
+            );
           }
         }
 
         await _saveTasks();
         notifyListeners();
-        
+
         logService.info('Added ${result.files.length} video(s) to queue');
       }
     } catch (e) {
@@ -217,21 +235,15 @@ class TaskManager extends ChangeNotifier {
 
     while (true) {
       // Find next pending task
-      final nextTask = _tasks.firstWhere(
+      final nextIndex = _tasks.indexWhere(
         (task) => task.status == VideoStatus.pending,
-        orElse: () => VideoTask(
-          id: '',
-          inputPath: '',
-          outputPath: '',
-          fileName: '',
-          fileSize: 0,
-        ),
       );
-
-      if (nextTask.id.isEmpty) {
+      if (nextIndex == -1) {
         // No more pending tasks
         break;
       }
+
+      final nextTask = _tasks[nextIndex];
 
       _currentTask = nextTask;
       notifyListeners();
@@ -244,6 +256,9 @@ class TaskManager extends ChangeNotifier {
           final index = _tasks.indexWhere((t) => t.id == nextTask.id);
           if (index != -1) {
             _tasks[index] = _tasks[index].copyWith(progress: progress);
+            if (_currentTask?.id == nextTask.id) {
+              _currentTask = _tasks[index];
+            }
             notifyListeners();
           }
         },
@@ -251,6 +266,9 @@ class TaskManager extends ChangeNotifier {
           final index = _tasks.indexWhere((t) => t.id == updatedTask.id);
           if (index != -1) {
             _tasks[index] = updatedTask;
+            if (_currentTask?.id == updatedTask.id) {
+              _currentTask = updatedTask;
+            }
             _saveTasks();
             notifyListeners();
           }
@@ -264,7 +282,7 @@ class TaskManager extends ChangeNotifier {
     _isProcessing = false;
     _currentTask = null;
     notifyListeners();
-    
+
     logService.info('Processing queue completed');
   }
 
@@ -273,7 +291,7 @@ class TaskManager extends ChangeNotifier {
 
     if (_currentTask?.sessionId != null) {
       await compressionService.cancelCompression(_currentTask!.sessionId!);
-      
+
       final index = _tasks.indexWhere((t) => t.id == _currentTask!.id);
       if (index != -1) {
         _tasks[index] = _tasks[index].copyWith(
@@ -288,13 +306,13 @@ class TaskManager extends ChangeNotifier {
     _currentTask = null;
     await _saveTasks();
     notifyListeners();
-    
+
     logService.info('Processing paused');
   }
 
   Future<void> removeTask(String taskId) async {
     final task = _tasks.firstWhere((t) => t.id == taskId);
-    
+
     if (task.status == VideoStatus.processing && task.sessionId != null) {
       await compressionService.cancelCompression(task.sessionId!);
     }
@@ -302,7 +320,7 @@ class TaskManager extends ChangeNotifier {
     _tasks.removeWhere((t) => t.id == taskId);
     await _saveTasks();
     notifyListeners();
-    
+
     logService.info('Removed task: ${task.fileName}', taskId: taskId);
   }
 
@@ -317,8 +335,11 @@ class TaskManager extends ChangeNotifier {
       );
       await _saveTasks();
       notifyListeners();
-      
-      logService.info('Retrying task: ${_tasks[index].fileName}', taskId: taskId);
+
+      logService.info(
+        'Retrying task: ${_tasks[index].fileName}',
+        taskId: taskId,
+      );
     }
   }
 
@@ -326,24 +347,27 @@ class TaskManager extends ChangeNotifier {
     _tasks.removeWhere((t) => t.status == VideoStatus.completed);
     await _saveTasks();
     notifyListeners();
-    
+
     logService.info('Cleared completed tasks');
   }
 
   Future<void> clearAll() async {
     // Cancel all processing tasks
     await compressionService.cancelAllSessions();
-    
+
     _tasks.clear();
     _isProcessing = false;
     _currentTask = null;
     await _saveTasks();
     notifyListeners();
-    
+
     logService.info('Cleared all tasks');
   }
 
   Future<void> _saveTasks() async {
+    if (!_initialized) {
+      return;
+    }
     await storageService.saveTasks(_tasks);
   }
 }
