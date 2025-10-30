@@ -1,9 +1,9 @@
 import 'dart:io';
-import 'package:ffmpeg_kit_flutter_video/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_video/ffmpeg_kit_config.dart';
-import 'package:ffmpeg_kit_flutter_video/ffprobe_kit.dart';
-import 'package:ffmpeg_kit_flutter_video/return_code.dart';
-import 'package:ffmpeg_kit_flutter_video/statistics.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit_config.dart';
+import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:ffmpeg_kit_flutter_new/statistics.dart';
 import 'package:path/path.dart' as path;
 import '../models/video_task.dart';
 import '../models/compression_settings.dart';
