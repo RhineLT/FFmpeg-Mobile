@@ -207,7 +207,7 @@ class VideoCompressionService {
 
       final failedTask = task.copyWith(
         status: VideoStatus.failed,
-        errorMessage: errorDescription,
+        errorMessage: e.toString(),
         sessionId: null,
       );
       onStatusChange(failedTask);
