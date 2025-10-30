@@ -3,7 +3,6 @@ class CompressionSettings {
   final String preset;
   final String customParams;
   final int maxBitrate; // in kbps, 0 means no limit
-  final bool useHardwareAccel;
   final String resolution; // 分辨率，如 "1920x1080"，"original" 表示原始
   final int frameRate; // 帧率，0 表示使用原始帧率
 
@@ -12,7 +11,6 @@ class CompressionSettings {
     this.preset = 'medium',
     this.customParams = '',
     this.maxBitrate = 0,
-    this.useHardwareAccel = true,
     this.resolution = 'original',
     this.frameRate = 0,
   });
@@ -22,7 +20,6 @@ class CompressionSettings {
     String? preset,
     String? customParams,
     int? maxBitrate,
-    bool? useHardwareAccel,
     String? resolution,
     int? frameRate,
   }) {
@@ -31,7 +28,6 @@ class CompressionSettings {
       preset: preset ?? this.preset,
       customParams: customParams ?? this.customParams,
       maxBitrate: maxBitrate ?? this.maxBitrate,
-      useHardwareAccel: useHardwareAccel ?? this.useHardwareAccel,
       resolution: resolution ?? this.resolution,
       frameRate: frameRate ?? this.frameRate,
     );
@@ -40,12 +36,10 @@ class CompressionSettings {
   String get commandPreview {
     final List<String> parts = [];
     
-    // Hardware acceleration
-    if (useHardwareAccel) {
-      parts.add('-hwaccel auto');
-    }
+    // Input (placeholder)
+    parts.add('-i input.mp4');
     
-    // Video codec
+    // Video codec - 始终使用软件编码 libx265
     parts.add('-c:v libx265');
     
     // CRF setting
@@ -53,12 +47,6 @@ class CompressionSettings {
     
     // Preset
     parts.add('-preset $preset');
-    
-    // Bitrate limit
-    if (maxBitrate > 0) {
-      parts.add('-maxrate ${maxBitrate}k');
-      parts.add('-bufsize ${maxBitrate * 2}k');
-    }
     
     // Resolution
     if (resolution != 'original') {
@@ -70,6 +58,12 @@ class CompressionSettings {
       parts.add('-r $frameRate');
     }
     
+    // Bitrate limit
+    if (maxBitrate > 0) {
+      parts.add('-maxrate ${maxBitrate}k');
+      parts.add('-bufsize ${maxBitrate * 2}k');
+    }
+    
     // Audio codec
     parts.add('-c:a aac');
     parts.add('-b:a 128k');
@@ -79,7 +73,10 @@ class CompressionSettings {
       parts.add(customParams);
     }
     
-    return parts.join(' ');
+    // Output (placeholder)
+    parts.add('output.mp4');
+    
+    return 'ffmpeg -y ${parts.join(' ')}';
   }
 
   Map<String, dynamic> toJson() {
@@ -88,7 +85,6 @@ class CompressionSettings {
       'preset': preset,
       'customParams': customParams,
       'maxBitrate': maxBitrate,
-      'useHardwareAccel': useHardwareAccel,
       'resolution': resolution,
       'frameRate': frameRate,
     };
@@ -100,7 +96,6 @@ class CompressionSettings {
       preset: json['preset'] ?? 'medium',
       customParams: json['customParams'] ?? '',
       maxBitrate: json['maxBitrate'] ?? 0,
-      useHardwareAccel: json['useHardwareAccel'] ?? true,
       resolution: json['resolution'] ?? 'original',
       frameRate: json['frameRate'] ?? 0,
     );

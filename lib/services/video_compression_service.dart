@@ -97,17 +97,25 @@ class VideoCompressionService {
             logService.warning('FFmpeg execution cancelled', taskId: task.id);
           } else {
             final output = await session.getOutput();
+            final failStackTrace = await session.getFailStackTrace();
             logService.error(
-              'FFmpeg execution failed',
+              'FFmpeg execution failed\nOutput: $output\nStackTrace: $failStackTrace',
               taskId: task.id,
-              error: output,
+              error: 'Return code: $returnCode',
             );
           }
         },
         (log) {
           final message = log.getMessage();
-          if (message.contains('error') || message.contains('Error')) {
+          // 记录所有包含 error、fail、warning 的消息
+          if (message.contains('error') || 
+              message.contains('Error') ||
+              message.contains('fail') ||
+              message.contains('warning')) {
             logService.error('FFmpeg: $message', taskId: task.id);
+          } else if (message.contains('frame=') || message.contains('size=')) {
+            // 跳过进度信息（由 statistics 回调处理）
+            logService.debug('FFmpeg: $message', taskId: task.id);
           } else {
             logService.debug('FFmpeg: $message', taskId: task.id);
           }
@@ -125,7 +133,7 @@ class VideoCompressionService {
               if (totalDuration > 0) {
                 final prog = (timeInMilliseconds / totalDuration).clamp(
                   0.0,
-                  0.99,
+                  1.0,
                 );
                 onProgress(prog);
               }
@@ -164,6 +172,16 @@ class VideoCompressionService {
           throw Exception('Output file not found after compression');
         }
       } else if (ReturnCode.isCancel(returnCode)) {
+        // 清理未完成的输出文件
+        final outputFile = File(task.outputPath);
+        if (await outputFile.exists()) {
+          await outputFile.delete();
+          logService.debug(
+            'Deleted incomplete output file after cancellation',
+            taskId: task.id,
+          );
+        }
+
         final cancelledTask = processingTask.copyWith(
           status: VideoStatus.pending,
           progress: 0.0,
@@ -179,32 +197,6 @@ class VideoCompressionService {
       if (await outputFile.exists()) {
         await outputFile.delete();
         logService.debug('Deleted incomplete output file', taskId: task.id);
-      }
-
-      final errorDescription = e.toString();
-
-      if (settings.useHardwareAccel &&
-          _shouldFallbackToSoftware(errorDescription)) {
-        logService.warning(
-          'Hardware acceleration failed, retrying with software encoder',
-          taskId: task.id,
-        );
-
-        final resetTask = task.copyWith(
-          status: VideoStatus.pending,
-          progress: 0.0,
-          errorMessage: null,
-          sessionId: null,
-        );
-        onStatusChange(resetTask);
-
-        await compressVideo(
-          task: resetTask,
-          settings: settings.copyWith(useHardwareAccel: false),
-          onProgress: onProgress,
-          onStatusChange: onStatusChange,
-        );
-        return;
       }
 
       logService.error(
@@ -231,36 +223,32 @@ class VideoCompressionService {
   }) {
     final args = <String>['-y', '-i', inputPath];
 
-    if (settings.useHardwareAccel) {
-      if (Platform.isAndroid) {
-        args.addAll(['-c:v', 'hevc_mediacodec']);
-      } else if (Platform.isIOS || Platform.isMacOS) {
-        args.addAll(['-c:v', 'hevc_videotoolbox']);
-      } else {
-        args.addAll(['-c:v', 'libx265']);
-      }
-    } else {
-      args.addAll(['-c:v', 'libx265']);
-      args.addAll(['-crf', settings.crf.toString()]);
-      args.addAll(['-preset', settings.preset]);
-    }
+    // 始终使用软件编码 libx265 + CRF 模式
+    args.addAll(['-c:v', 'libx265']);
+    args.addAll(['-crf', settings.crf.toString()]);
+    args.addAll(['-preset', settings.preset]);
 
+    // 分辨率设置
     if (settings.resolution != 'original') {
       args.addAll(['-s', settings.resolution]);
     }
 
+    // 帧率设置
     if (settings.frameRate > 0) {
       args.addAll(['-r', settings.frameRate.toString()]);
     }
 
+    // 比特率限制（可选）
     if (settings.maxBitrate > 0) {
       args.addAll(['-maxrate', '${settings.maxBitrate}k']);
       args.addAll(['-bufsize', '${settings.maxBitrate * 2}k']);
     }
 
+    // 音频编码
     args.addAll(['-c:a', 'aac']);
     args.addAll(['-b:a', '128k']);
 
+    // 自定义参数
     if (settings.customParams.isNotEmpty) {
       args.addAll(_splitCustomParams(settings.customParams));
     }
@@ -334,19 +322,5 @@ class VideoCompressionService {
     }
 
     return baseFileName;
-  }
-
-  bool _shouldFallbackToSoftware(String error) {
-    final message = error.toLowerCase();
-    if (message.contains('mediacodec') || message.contains('videotoolbox')) {
-      return true;
-    }
-    if (message.contains('hardware') && message.contains('fail')) {
-      return true;
-    }
-    if (message.contains('unknown encoder') && message.contains('hevc')) {
-      return true;
-    }
-    return false;
   }
 }

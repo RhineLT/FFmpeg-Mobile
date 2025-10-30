@@ -331,24 +331,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 
                 const SizedBox(height: 24),
                 
-                // Hardware Acceleration
-                _buildSectionTitle('性能设置'),
-                const SizedBox(height: 8),
-                Card(
-                  child: SwitchListTile(
-                    title: const Text('硬件加速'),
-                    subtitle: const Text('使用设备硬件加速编码（推荐）'),
-                    value: settings.useHardwareAccel,
-                    onChanged: (value) {
-                      taskManager.updateCompressionSettings(
-                        settings.copyWith(useHardwareAccel: value),
-                      );
-                    },
-                  ),
-                ),
-                
-                const SizedBox(height: 24),
-                
                 // Custom Parameters
                 _buildSectionTitle('高级自定义参数'),
                 const SizedBox(height: 8),
