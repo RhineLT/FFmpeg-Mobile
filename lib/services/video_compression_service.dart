@@ -265,36 +265,9 @@ class VideoCompressionService {
     args.add('-preset');
     args.add(settings.preset);
 
-    // 分辨率设置
-    if (settings.resolution != 'original') {
-      args.add('-vf');
-      args.add('scale=${settings.resolution.replaceAll('x', ':')}');
-    }
-
-    // 帧率设置
-    if (settings.frameRate > 0) {
-      args.add('-r');
-      args.add(settings.frameRate.toString());
-    }
-
-    // 比特率限制（可选）
-    if (settings.maxBitrate > 0) {
-      args.add('-maxrate');
-      args.add('${settings.maxBitrate}k');
-      args.add('-bufsize');
-      args.add('${settings.maxBitrate * 2}k');
-    }
-
-    // 音频编码
+    // 音频编码 - 复制音频流以避免重新编码（更快）
     args.add('-c:a');
-    args.add('aac');
-    args.add('-b:a');
-    args.add('128k');
-
-    // 自定义参数
-    if (settings.customParams.isNotEmpty) {
-      args.addAll(_splitCustomParams(settings.customParams));
-    }
+    args.add('copy');
 
     // 输出文件
     args.add(outputPath);
