@@ -1,17 +1,22 @@
 import 'dart:io';
-import 'package:video_compress/video_compress.dart';
+import 'package:flutter_ffmpeg/flutter_ffmpeg.dart';
 import 'package:path/path.dart' as path;
 import '../models/video_task.dart';
+import '../models/compression_settings.dart';
 import 'log_service.dart';
 
 class VideoCompressionService {
   final LogService logService;
-  dynamic _progressSubscription;
+  final FlutterFFmpeg _flutterFFmpeg = FlutterFFmpeg();
+  final FlutterFFmpegConfig _flutterFFmpegConfig = FlutterFFmpegConfig();
+  final FlutterFFprobe _flutterFFprobe = FlutterFFprobe();
+  int? _currentExecutionId;
   
   VideoCompressionService({required this.logService});
 
   Future<void> compressVideo({
     required VideoTask task,
+    required CompressionSettings settings,
     required Function(double progress) onProgress,
     required Function(VideoTask updatedTask) onStatusChange,
   }) async {
@@ -32,43 +37,9 @@ class VideoCompressionService {
         logService.info('Created output directory: ${outputDir.path}', taskId: task.id);
       }
 
-      // Cancel any existing subscription before creating a new one
-      _progressSubscription?.unsubscribe();
-      
-      // Subscribe to compression progress using the correct method
-      _progressSubscription = VideoCompress.compressProgress$.subscribe((progress) {
-        if (progress > 0) {
-          final normalizedProgress = (progress / 100.0).clamp(0.0, 0.99);
-          onProgress(normalizedProgress);
-          logService.debug('Compression progress: ${progress.toStringAsFixed(1)}%', taskId: task.id);
-        }
-      });
-
-      logService.info('Starting video compression with H.265 CRF 28 equivalent settings', taskId: task.id);
-
-      // Compress video
-      // video_compress uses MediaCodec on Android and AVAssetExportSession on iOS
-      // We'll use high quality settings to approximate H.265 CRF 28
-      final info = await VideoCompress.compressVideo(
-        task.inputPath,
-        quality: VideoQuality.DefaultQuality,
-        deleteOrigin: false,
-        includeAudio: true,
-      );
-
-      if (info == null) {
-        throw Exception('Compression failed: no output file generated');
-      }
-
-      // Move the compressed file to the desired output path
-      final compressedFile = File(info.path!);
-      if (!await compressedFile.exists()) {
-        throw Exception('Compressed file not found at ${info.path}');
-      }
-
       // Check if output file already exists and adjust name if needed
       String finalOutputPath = task.outputPath;
-      if (await File(finalOutputPath).exists() && info.path != finalOutputPath) {
+      if (await File(finalOutputPath).exists()) {
         final dir = path.dirname(finalOutputPath);
         final fileName = path.basename(finalOutputPath);
         final nameWithoutExt = path.basenameWithoutExtension(fileName);
@@ -83,13 +54,96 @@ class VideoCompressionService {
         logService.info('Output file exists, using: ${path.basename(finalOutputPath)}', taskId: task.id);
       }
 
-      // If output path is different, move the file
-      if (info.path != finalOutputPath) {
-        await compressedFile.copy(finalOutputPath);
-        await compressedFile.delete();
+      // Build FFmpeg command
+      List<String> command = [];
+      
+      // Hardware acceleration
+      if (settings.useHardwareAccel) {
+        command.addAll(['-hwaccel', 'auto']);
+      }
+      
+      // Input file
+      command.addAll(['-i', task.inputPath]);
+      
+      // Video codec - H.265
+      command.addAll(['-c:v', 'libx265']);
+      
+      // CRF setting
+      command.addAll(['-crf', settings.crf.toString()]);
+      
+      // Preset
+      command.addAll(['-preset', settings.preset]);
+      
+      // Bitrate limit
+      if (settings.maxBitrate > 0) {
+        command.addAll([
+          '-maxrate', '${settings.maxBitrate}k',
+          '-bufsize', '${settings.maxBitrate * 2}k',
+        ]);
+      }
+      
+      // Resolution
+      if (settings.resolution != 'original') {
+        command.addAll(['-s', settings.resolution]);
+      }
+      
+      // Frame rate
+      if (settings.frameRate > 0) {
+        command.addAll(['-r', settings.frameRate.toString()]);
+      }
+      
+      // Audio codec
+      command.addAll(['-c:a', 'aac', '-b:a', '128k']);
+      
+      // Custom parameters
+      if (settings.customParams.isNotEmpty) {
+        command.addAll(settings.customParams.split(' '));
+      }
+      
+      // Overwrite output file
+      command.add('-y');
+      
+      // Output file
+      command.add(finalOutputPath);
+
+      final commandStr = command.join(' ');
+      logService.info('FFmpeg command: $commandStr', taskId: task.id);
+
+      // Get video duration for accurate progress tracking
+      final videoDuration = await getVideoDuration(task.inputPath);
+      logService.info('Video duration: ${videoDuration}ms', taskId: task.id);
+
+      // Enable statistics callback for progress tracking
+      _flutterFFmpegConfig.enableStatisticsCallback((statistics) {
+        final time = statistics.time;
+        if (time > 0 && videoDuration != null && videoDuration > 0) {
+          // Calculate progress based on time processed vs total duration
+          final progress = (time / videoDuration).clamp(0.0, 0.99);
+          onProgress(progress);
+          
+          if (time % 5000 < 100) { // Log every ~5 seconds
+            logService.debug(
+              'Progress: ${(progress * 100).toStringAsFixed(1)}% '
+              '(${time}ms / ${videoDuration}ms)',
+              taskId: task.id,
+            );
+          }
+        }
+      });
+
+      // Execute FFmpeg command
+      final returnCode = await _flutterFFmpeg.executeWithArguments(command);
+      _currentExecutionId = returnCode;
+
+      if (returnCode != 0) {
+        throw Exception('FFmpeg execution failed with return code: $returnCode');
       }
 
       final outputFile = File(finalOutputPath);
+      if (!await outputFile.exists()) {
+        throw Exception('Output file not created: $finalOutputPath');
+      }
+
       final outputSize = await outputFile.length();
       
       logService.info(
@@ -126,14 +180,20 @@ class VideoCompressionService {
         errorMessage: e.toString(),
       );
       onStatusChange(failedTask);
+    } finally {
+      // Disable statistics callback
+      _flutterFFmpegConfig.enableStatisticsCallback(null);
+      _currentExecutionId = null;
     }
   }
 
   Future<void> cancelCompression(int sessionId) async {
     try {
-      _progressSubscription?.unsubscribe();
-      VideoCompress.cancelCompression();
-      logService.info('Cancelled compression');
+      if (_currentExecutionId != null) {
+        await _flutterFFmpeg.cancel();
+        _currentExecutionId = null;
+        logService.info('Cancelled compression session $sessionId');
+      }
     } catch (e) {
       logService.error('Failed to cancel compression', error: e);
     }
@@ -141,8 +201,8 @@ class VideoCompressionService {
 
   Future<void> cancelAllSessions() async {
     try {
-      _progressSubscription?.unsubscribe();
-      VideoCompress.cancelCompression();
+      await _flutterFFmpeg.cancel();
+      _currentExecutionId = null;
       logService.info('Cancelled all compression tasks');
     } catch (e) {
       logService.error('Failed to cancel all tasks', error: e);
@@ -151,11 +211,27 @@ class VideoCompressionService {
 
   Future<void> dispose() async {
     try {
-      _progressSubscription?.unsubscribe();
-      VideoCompress.dispose();
+      await _flutterFFmpeg.cancel();
+      _flutterFFmpegConfig.enableStatisticsCallback(null);
+      _currentExecutionId = null;
+      logService.info('VideoCompressionService disposed');
     } catch (e) {
-      logService.error('Error disposing VideoCompress', error: e);
+      logService.error('Error disposing VideoCompressionService', error: e);
     }
+  }
+
+  /// Get video duration in milliseconds using FFprobe
+  Future<int?> getVideoDuration(String videoPath) async {
+    try {
+      final info = await _flutterFFprobe.getMediaInformation(videoPath);
+      final duration = info.getMediaProperties()?['duration'];
+      if (duration != null) {
+        return (double.parse(duration.toString()) * 1000).toInt();
+      }
+    } catch (e) {
+      logService.error('Failed to get video duration', error: e);
+    }
+    return null;
   }
 
   String getOutputFileName(String inputFileName, int crf, String outputDir) {
