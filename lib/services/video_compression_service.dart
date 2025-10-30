@@ -134,30 +134,20 @@ class VideoCompressionService {
         });
       }
 
-      // Execute FFmpeg command
-      final session = await FFmpegKit.executeWithArgumentsAsync(
-        command,
-        (session) async {
-          // Completion callback
-          final returnCode = await session.getReturnCode();
-          logService.info('FFmpeg session completed with code: $returnCode', taskId: task.id);
-        },
-        (log) {
-          // Log callback - optional, can be used for debugging
-          // logService.debug('FFmpeg: ${log.getMessage()}', taskId: task.id);
-        },
-        (statistics) {
-          // Statistics handled by global callback above
-        },
-      );
+      // Execute FFmpeg command synchronously (waits for completion)
+      logService.info('Executing FFmpeg command...', taskId: task.id);
+      final session = await FFmpegKit.executeWithArguments(command);
 
       _currentSessionId = session.getSessionId();
       
-      // Wait for completion
+      // Check completion status
       final returnCode = await session.getReturnCode();
-      if (!ReturnCode.isSuccess(returnCode)) {
-        final output = await session.getOutput();
-        throw Exception('FFmpeg execution failed with return code: $returnCode\nOutput: $output');
+      final output = await session.getOutput();
+      
+      logService.info('FFmpeg session completed with code: ${returnCode?.getValue()}', taskId: task.id);
+      
+      if (returnCode == null || !ReturnCode.isSuccess(returnCode)) {
+        throw Exception('FFmpeg execution failed with return code: ${returnCode?.getValue()}\nOutput: $output');
       }
 
       // Disable statistics callback
