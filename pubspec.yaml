@@ -32,7 +32,8 @@ dependencies:
     sdk: flutter
   
   # Video compression - using ffmpeg_kit_flutter with video package (includes H.265)
-  ffmpeg_kit_flutter_video: ^6.0.3
+  # Using 5.1 for Maven compatibility
+  ffmpeg_kit_flutter_video: ^5.1.0
   
   # State management
   provider: ^6.1.2
