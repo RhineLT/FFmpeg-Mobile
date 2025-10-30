@@ -78,8 +78,33 @@ class VideoCompressionService {
         settings: settings,
       );
 
+      final commandString = _formatCommandForLog(commandArgs);
       logService.info(
-        'FFmpeg command: ffmpeg ${_formatCommandForLog(commandArgs)}',
+        'FFmpeg command: ffmpeg $commandString',
+        taskId: task.id,
+      );
+
+      // 验证输入文件存在
+      final inputFile = File(task.inputPath);
+      if (!await inputFile.exists()) {
+        throw Exception('Input file does not exist: ${task.inputPath}');
+      }
+      logService.info(
+        'Input file verified: ${task.inputPath} (${await inputFile.length()} bytes)',
+        taskId: task.id,
+      );
+
+      // 验证输出目录存在
+      final outputDir = Directory(path.dirname(task.outputPath));
+      if (!await outputDir.exists()) {
+        logService.warning(
+          'Output directory does not exist, creating: ${outputDir.path}',
+          taskId: task.id,
+        );
+        await outputDir.create(recursive: true);
+      }
+      logService.info(
+        'Output path ready: ${task.outputPath}',
         taskId: task.id,
       );
 
@@ -221,38 +246,57 @@ class VideoCompressionService {
     required String outputPath,
     required CompressionSettings settings,
   }) {
-    final args = <String>['-y', '-i', inputPath];
+    final args = <String>[];
 
-    // 始终使用软件编码 libx265 + CRF 模式
-    args.addAll(['-c:v', 'libx265']);
-    args.addAll(['-crf', settings.crf.toString()]);
-    args.addAll(['-preset', settings.preset]);
+    // 全局选项
+    args.add('-y'); // 覆盖输出文件
+
+    // 输入文件
+    args.add('-i');
+    args.add(inputPath);
+
+    // 视频编码 - 始终使用软件编码 libx265 + CRF 模式
+    args.add('-c:v');
+    args.add('libx265');
+    
+    args.add('-crf');
+    args.add(settings.crf.toString());
+    
+    args.add('-preset');
+    args.add(settings.preset);
 
     // 分辨率设置
     if (settings.resolution != 'original') {
-      args.addAll(['-s', settings.resolution]);
+      args.add('-vf');
+      args.add('scale=${settings.resolution.replaceAll('x', ':')}');
     }
 
     // 帧率设置
     if (settings.frameRate > 0) {
-      args.addAll(['-r', settings.frameRate.toString()]);
+      args.add('-r');
+      args.add(settings.frameRate.toString());
     }
 
     // 比特率限制（可选）
     if (settings.maxBitrate > 0) {
-      args.addAll(['-maxrate', '${settings.maxBitrate}k']);
-      args.addAll(['-bufsize', '${settings.maxBitrate * 2}k']);
+      args.add('-maxrate');
+      args.add('${settings.maxBitrate}k');
+      args.add('-bufsize');
+      args.add('${settings.maxBitrate * 2}k');
     }
 
     // 音频编码
-    args.addAll(['-c:a', 'aac']);
-    args.addAll(['-b:a', '128k']);
+    args.add('-c:a');
+    args.add('aac');
+    args.add('-b:a');
+    args.add('128k');
 
     // 自定义参数
     if (settings.customParams.isNotEmpty) {
       args.addAll(_splitCustomParams(settings.customParams));
     }
 
+    // 输出文件
     args.add(outputPath);
 
     return args;
