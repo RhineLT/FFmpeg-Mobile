@@ -1,5 +1,9 @@
 import 'dart:io';
-import 'package:flutter_ffmpeg/flutter_ffmpeg.dart';
+import 'package:ffmpeg_kit_flutter_video/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_video/ffmpeg_kit_config.dart';
+import 'package:ffmpeg_kit_flutter_video/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_video/return_code.dart';
+import 'package:ffmpeg_kit_flutter_video/statistics.dart';
 import 'package:path/path.dart' as path;
 import '../models/video_task.dart';
 import '../models/compression_settings.dart';
@@ -7,10 +11,7 @@ import 'log_service.dart';
 
 class VideoCompressionService {
   final LogService logService;
-  final FlutterFFmpeg _flutterFFmpeg = FlutterFFmpeg();
-  final FlutterFFmpegConfig _flutterFFmpegConfig = FlutterFFmpegConfig();
-  final FlutterFFprobe _flutterFFprobe = FlutterFFprobe();
-  int? _currentExecutionId;
+  int? _currentSessionId;
   
   VideoCompressionService({required this.logService});
 
@@ -107,37 +108,60 @@ class VideoCompressionService {
       command.add(finalOutputPath);
 
       final commandStr = command.join(' ');
-      logService.info('FFmpeg command: $commandStr', taskId: task.id);
+      logService.info('FFmpeg command: ffmpeg $commandStr', taskId: task.id);
 
       // Get video duration for accurate progress tracking
       final videoDuration = await getVideoDuration(task.inputPath);
       logService.info('Video duration: ${videoDuration}ms', taskId: task.id);
 
       // Enable statistics callback for progress tracking
-      _flutterFFmpegConfig.enableStatisticsCallback((statistics) {
-        final time = statistics.time;
-        if (time > 0 && videoDuration != null && videoDuration > 0) {
-          // Calculate progress based on time processed vs total duration
-          final progress = (time / videoDuration).clamp(0.0, 0.99);
-          onProgress(progress);
-          
-          if (time % 5000 < 100) { // Log every ~5 seconds
-            logService.debug(
-              'Progress: ${(progress * 100).toStringAsFixed(1)}% '
-              '(${time}ms / ${videoDuration}ms)',
-              taskId: task.id,
-            );
+      if (videoDuration != null && videoDuration > 0) {
+        FFmpegKitConfig.enableStatisticsCallback((Statistics statistics) {
+          final time = statistics.getTime();
+          if (time > 0) {
+            // Calculate progress based on time processed vs total duration
+            final progress = (time / videoDuration).clamp(0.0, 0.99);
+            onProgress(progress);
+            
+            if (time % 5000 < 100) { // Log every ~5 seconds
+              logService.debug(
+                'Progress: ${(progress * 100).toStringAsFixed(1)}% '
+                '(${time}ms / ${videoDuration}ms)',
+                taskId: task.id,
+              );
+            }
           }
-        }
-      });
+        });
+      }
 
       // Execute FFmpeg command
-      final returnCode = await _flutterFFmpeg.executeWithArguments(command);
-      _currentExecutionId = returnCode;
+      final session = await FFmpegKit.executeWithArgumentsAsync(
+        command,
+        (session) async {
+          // Completion callback
+          final returnCode = await session.getReturnCode();
+          logService.info('FFmpeg session completed with code: $returnCode', taskId: task.id);
+        },
+        (log) {
+          // Log callback - optional, can be used for debugging
+          // logService.debug('FFmpeg: ${log.getMessage()}', taskId: task.id);
+        },
+        (statistics) {
+          // Statistics handled by global callback above
+        },
+      );
 
-      if (returnCode != 0) {
-        throw Exception('FFmpeg execution failed with return code: $returnCode');
+      _currentSessionId = session.getSessionId();
+      
+      // Wait for completion
+      final returnCode = await session.getReturnCode();
+      if (!ReturnCode.isSuccess(returnCode)) {
+        final output = await session.getOutput();
+        throw Exception('FFmpeg execution failed with return code: $returnCode\nOutput: $output');
       }
+
+      // Disable statistics callback
+      FFmpegKitConfig.disableStatistics();
 
       final outputFile = File(finalOutputPath);
       if (!await outputFile.exists()) {
@@ -182,16 +206,16 @@ class VideoCompressionService {
       onStatusChange(failedTask);
     } finally {
       // Disable statistics callback
-      _flutterFFmpegConfig.enableStatisticsCallback(null);
-      _currentExecutionId = null;
+      FFmpegKitConfig.disableStatistics();
+      _currentSessionId = null;
     }
   }
 
   Future<void> cancelCompression(int sessionId) async {
     try {
-      if (_currentExecutionId != null) {
-        await _flutterFFmpeg.cancel();
-        _currentExecutionId = null;
+      if (_currentSessionId != null) {
+        await FFmpegKit.cancel(_currentSessionId!);
+        _currentSessionId = null;
         logService.info('Cancelled compression session $sessionId');
       }
     } catch (e) {
@@ -201,8 +225,8 @@ class VideoCompressionService {
 
   Future<void> cancelAllSessions() async {
     try {
-      await _flutterFFmpeg.cancel();
-      _currentExecutionId = null;
+      await FFmpegKit.cancel();
+      _currentSessionId = null;
       logService.info('Cancelled all compression tasks');
     } catch (e) {
       logService.error('Failed to cancel all tasks', error: e);
@@ -211,9 +235,9 @@ class VideoCompressionService {
 
   Future<void> dispose() async {
     try {
-      await _flutterFFmpeg.cancel();
-      _flutterFFmpegConfig.enableStatisticsCallback(null);
-      _currentExecutionId = null;
+      await FFmpegKit.cancel();
+      FFmpegKitConfig.disableStatistics();
+      _currentSessionId = null;
       logService.info('VideoCompressionService disposed');
     } catch (e) {
       logService.error('Error disposing VideoCompressionService', error: e);
@@ -223,10 +247,13 @@ class VideoCompressionService {
   /// Get video duration in milliseconds using FFprobe
   Future<int?> getVideoDuration(String videoPath) async {
     try {
-      final info = await _flutterFFprobe.getMediaInformation(videoPath);
-      final duration = info.getMediaProperties()?['duration'];
-      if (duration != null) {
-        return (double.parse(duration.toString()) * 1000).toInt();
+      final session = await FFprobeKit.getMediaInformation(videoPath);
+      final info = session.getMediaInformation();
+      if (info != null) {
+        final duration = info.getDuration();
+        if (duration != null) {
+          return (double.parse(duration) * 1000).toInt();
+        }
       }
     } catch (e) {
       logService.error('Failed to get video duration', error: e);
