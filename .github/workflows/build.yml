@@ -2,7 +2,7 @@ name: Build Mobile Apps
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, flutter_ffmpeg]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
